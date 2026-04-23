@@ -256,7 +256,7 @@ make pm2-restart
 ```bash
 git checkout main
 git pull --ff-only
-git tag v0.1.0
+git tag v1.0.1
 git push origin main --tags
 ```
 
@@ -292,7 +292,7 @@ git push origin main --tags
 ```bash
 make docker-buildx DOCKER_PLATFORM=linux/amd64
 make docker-buildx DOCKER_PLATFORM=linux/arm64
-make docker-buildx-push DOCKER_IMAGE=ghcr.io/tkfka1/claude-proxy DOCKER_TAG=v0.1.0
+make docker-buildx-push DOCKER_IMAGE=ghcr.io/tkfka1/claude-proxy DOCKER_TAG=v1.0.1
 ```
 
 ---
