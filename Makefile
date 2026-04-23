@@ -1,4 +1,4 @@
-.PHONY: install start test pack-dry-run health helm-lint helm-template compose-up compose-down compose-logs docker-build docker-buildx docker-buildx-push docker-run pm2-start pm2-restart
+.PHONY: install start test pack-dry-run health helm-lint helm-template helm-template-prod k8s-create-claude-secret k8s-create-proxy-secret k8s-deploy k8s-dry-run compose-up compose-down compose-logs docker-build docker-buildx docker-buildx-push docker-run pm2-start pm2-restart
 
 DOCKER_IMAGE ?= claude-anthropic-proxy
 DOCKER_TAG ?= dev
@@ -25,6 +25,22 @@ helm-lint:
 
 helm-template:
 	helm template claude-proxy charts/claude-anthropic-proxy
+
+helm-template-prod:
+	helm template claude-proxy charts/claude-anthropic-proxy \
+		-f charts/claude-anthropic-proxy/values-prod.yaml
+
+k8s-create-claude-secret:
+	./deploy/k8s/create-claude-auth-secret.sh
+
+k8s-create-proxy-secret:
+	./deploy/k8s/create-proxy-env-secret.sh
+
+k8s-deploy:
+	./deploy/k8s/deploy-helm.sh
+
+k8s-dry-run:
+	DRY_RUN=true ./deploy/k8s/deploy-helm.sh
 
 compose-up:
 	docker compose up -d --build

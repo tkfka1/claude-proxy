@@ -222,6 +222,11 @@ make docker-buildx-push
 make docker-run
 make helm-lint
 make helm-template
+make helm-template-prod
+make k8s-create-claude-secret
+make k8s-create-proxy-secret
+make k8s-deploy
+make k8s-dry-run
 make compose-up
 make compose-down
 make compose-logs
@@ -516,24 +521,37 @@ Helm chart는 아래 경로에 추가했습니다.
 charts/claude-anthropic-proxy
 ```
 
+실제 클러스터 배포 helper script:
+
+```text
+deploy/k8s/
+```
+
 빠른 설치 예시:
 
 ```bash
-kubectl create namespace claude-proxy
-kubectl create secret generic claude-auth \
-  -n claude-proxy \
-  --from-file=credentials.json=$HOME/.claude/.credentials.json \
-  --from-file=settings.json=$HOME/.claude/settings.json
-
-helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
-  -n claude-proxy \
-  --create-namespace \
-  --set image.repository=claude-anthropic-proxy \
-  --set image.tag=latest \
-  --set claudeAuth.existingSecret=claude-auth
+./deploy/k8s/create-claude-auth-secret.sh
+PROXY_API_KEY='replace-with-strong-random-value' ./deploy/k8s/create-proxy-env-secret.sh
+./deploy/k8s/deploy-helm.sh
 ```
 
-자세한 값과 예시는 `charts/claude-anthropic-proxy/README.md` 참고.
+prod dry-run 예시:
+
+```bash
+DRY_RUN=true ./deploy/k8s/deploy-helm.sh
+```
+
+Ingress 예시:
+
+```bash
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml \
+./deploy/k8s/deploy-helm.sh
+```
+
+자세한 값과 예시는 아래 문서 참고:
+
+- `deploy/k8s/README.md`
+- `charts/claude-anthropic-proxy/README.md`
 
 추가 예시 파일:
 

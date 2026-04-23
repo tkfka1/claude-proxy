@@ -8,6 +8,7 @@
 - `examples/sealed-secret.yaml`: Bitnami SealedSecret 예시
 - `examples/values-ingress-cert-manager.yaml`: Ingress + cert-manager values 예시
 - `examples/clusterissuer-letsencrypt.yaml`: cert-manager ClusterIssuer 예시
+- `../../deploy/k8s/*.sh`: 실제 클러스터 배포용 helper script
 
 ## 설치 전 준비
 
@@ -15,6 +16,12 @@
 가장 쉬운 방법은 로컬 `~/.claude/.credentials.json` 을 Kubernetes Secret으로 넣는 것입니다.
 
 ### 기존 로그인 정보로 Secret 생성
+
+```bash
+./deploy/k8s/create-claude-auth-secret.sh
+```
+
+또는 수동 명령:
 
 ```bash
 kubectl create namespace claude-proxy
@@ -25,15 +32,29 @@ kubectl create secret generic claude-auth \
   --from-file=settings.json=$HOME/.claude/settings.json
 ```
 
-## 설치
+## 프록시 API key Secret
+
+운영에서는 values 파일에 평문 키를 넣지 말고 Secret으로 넣는 것을 권장합니다.
 
 ```bash
-helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+PROXY_API_KEY='replace-with-strong-random-value' \
+./deploy/k8s/create-proxy-env-secret.sh
+```
+
+수동 명령:
+
+```bash
+kubectl create secret generic claude-proxy-env \
   -n claude-proxy \
-  --create-namespace \
-  --set image.repository=claude-anthropic-proxy \
-  --set image.tag=latest \
-  --set claudeAuth.existingSecret=claude-auth
+  --from-literal=PROXY_API_KEY='replace-with-strong-random-value'
+```
+
+## 설치
+
+가장 쉬운 방법:
+
+```bash
+./deploy/k8s/deploy-helm.sh
 ```
 
 ## 운영용 values 예시 사용
@@ -43,9 +64,8 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   -n claude-proxy \
   --create-namespace \
   -f charts/claude-anthropic-proxy/values-prod.yaml \
-  --set image.repository=ghcr.io/example/claude-anthropic-proxy \
-  --set image.tag=0.1.0 \
-  --set claudeAuth.existingSecret=claude-auth
+  --set claudeAuth.existingSecret=claude-auth \
+  --set proxyApiKey.existingSecret=claude-proxy-env
 ```
 
 ## Ingress + cert-manager 예시
@@ -53,14 +73,8 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 ```bash
 kubectl apply -f charts/claude-anthropic-proxy/examples/clusterissuer-letsencrypt.yaml
 
-helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
-  -n claude-proxy \
-  --create-namespace \
-  -f charts/claude-anthropic-proxy/values-prod.yaml \
-  -f charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml \
-  --set image.repository=ghcr.io/example/claude-anthropic-proxy \
-  --set image.tag=0.1.0 \
-  --set claudeAuth.existingSecret=claude-auth
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml \
+./deploy/k8s/deploy-helm.sh
 ```
 
 ## ExternalSecret 예시
@@ -89,8 +103,8 @@ kubectl apply -f charts/claude-anthropic-proxy/examples/sealed-secret.yaml
 helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   -n claude-proxy \
   --create-namespace \
-  --set image.repository=claude-anthropic-proxy \
-  --set image.tag=latest \
+  --set image.repository=ghcr.io/tkfka1/claude-proxy \
+  --set image.tag=1.0.1 \
   --set claudeAuth.createSecret=true \
   --set-file claudeAuth.inline.credentialsJson=$HOME/.claude/.credentials.json \
   --set-file claudeAuth.inline.settingsJson=$HOME/.claude/settings.json
@@ -107,6 +121,8 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `resources`
 - `podDisruptionBudget.*`
 - `env.*`
+- `proxyApiKey.value`
+- `proxyApiKey.existingSecret`
 - `claudeAuth.existingSecret`
 - `claudeAuth.createSecret`
 - `claudeAuth.mountPath`
@@ -115,14 +131,16 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 
 ```yaml
 image:
-  repository: ghcr.io/example/claude-anthropic-proxy
-  tag: "0.1.0"
+  repository: ghcr.io/tkfka1/claude-proxy
+  tag: "1.0.1"
 
 env:
   CLAUDE_DEFAULT_MODEL: sonnet
-  ENABLE_REQUEST_LOGGING: "true"
-  PROXY_API_KEY: change-me
+  ENABLE_REQUEST_LOGGING: "false"
   ALLOW_MISSING_API_KEY_HEADER: "false"
+
+proxyApiKey:
+  existingSecret: claude-proxy-env
 
 service:
   type: ClusterIP

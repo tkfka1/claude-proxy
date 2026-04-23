@@ -45,6 +45,16 @@ spec:
             - name: {{ $name }}
               value: {{ printf "%v" $value | quote }}
             {{- end }}
+            {{- if .Values.proxyApiKey.existingSecret }}
+            - name: PROXY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.proxyApiKey.existingSecret }}
+                  key: {{ .Values.proxyApiKey.existingSecretKey }}
+            {{- else if ne (default "" .Values.proxyApiKey.value) "" }}
+            - name: PROXY_API_KEY
+              value: {{ .Values.proxyApiKey.value | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

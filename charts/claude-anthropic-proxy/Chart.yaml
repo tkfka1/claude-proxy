@@ -2,8 +2,8 @@ apiVersion: v2
 name: claude-anthropic-proxy
 description: Anthropic Messages API-compatible proxy backed by claude-cli
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 1.0.1
+appVersion: "1.0.1"
 kubeVersion: ">=1.20.0-0"
 keywords:
   - anthropic

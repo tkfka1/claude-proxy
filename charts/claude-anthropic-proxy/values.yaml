@@ -76,10 +76,14 @@ env:
   CLAUDE_DEFAULT_MODEL: sonnet
   CLAUDE_MODEL_MAP_JSON: ""
   CLAUDE_EXTRA_ARGS_JSON: "[]"
-  PROXY_API_KEY: ""
   ALLOW_MISSING_API_KEY_HEADER: "true"
   REQUIRE_ANTHROPIC_VERSION: "false"
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
+
+proxyApiKey:
+  value: ""
+  existingSecret: ""
+  existingSecretKey: PROXY_API_KEY
 
 claudeAuth:
   existingSecret: ""

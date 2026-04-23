@@ -1,8 +1,8 @@
 replicaCount: 2
 
 image:
-  repository: ghcr.io/example/claude-anthropic-proxy
-  tag: "0.1.0"
+  repository: ghcr.io/tkfka1/claude-proxy
+  tag: "1.0.1"
   pullPolicy: IfNotPresent
 
 service:
@@ -19,7 +19,8 @@ resources:
     memory: 1Gi
 
 podDisruptionBudget:
-  enabled: false
+  enabled: true
+  minAvailable: 1
 
 autoscaling:
   enabled: true
@@ -31,15 +32,18 @@ env:
   HOST: 0.0.0.0
   PORT: "8080"
   REQUEST_BODY_LIMIT_BYTES: "33554432"
-  ENABLE_REQUEST_LOGGING: "true"
+  ENABLE_REQUEST_LOGGING: "false"
   CLAUDE_BIN: claude
   CLAUDE_DEFAULT_MODEL: sonnet
   CLAUDE_MODEL_MAP_JSON: '{"claude-sonnet-4-20250514":"sonnet","claude-opus-4-20250514":"opus","claude-haiku-4-5":"haiku"}'
   CLAUDE_EXTRA_ARGS_JSON: "[]"
-  PROXY_API_KEY: "change-me"
   ALLOW_MISSING_API_KEY_HEADER: "false"
   REQUIRE_ANTHROPIC_VERSION: "true"
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
+
+proxyApiKey:
+  existingSecret: claude-proxy-env
+  existingSecretKey: PROXY_API_KEY
 
 claudeAuth:
   existingSecret: claude-auth
