@@ -1,0 +1,17 @@
+{
+  "name": "claude-anthropic-proxy",
+  "version": "0.1.0",
+  "description": "Anthropic Messages API-compatible proxy backed by claude-cli",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}

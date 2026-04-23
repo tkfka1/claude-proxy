@@ -1,0 +1,15 @@
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+  hosts:
+    - host: claude-proxy.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: claude-proxy-tls
+      hosts:
+        - claude-proxy.example.com

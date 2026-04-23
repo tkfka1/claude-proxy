@@ -1,0 +1,20 @@
+[Unit]
+Description=Claude Anthropic Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/opt/claude-anthropic-proxy
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/claude-anthropic-proxy.env
+ExecStart=/usr/bin/env node /opt/claude-anthropic-proxy/src/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
