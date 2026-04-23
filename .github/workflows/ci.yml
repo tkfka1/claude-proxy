@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  node:
+    name: Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - 20
+          - 22
+          - 24
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify npm package contents
+        run: npm run pack:dry-run
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: helm lint charts/claude-anthropic-proxy
+
+      - name: Render Helm chart
+        run: helm template claude-proxy charts/claude-anthropic-proxy > /tmp/claude-proxy-manifest.yaml
+
+  docker:
+    name: Docker ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: false
+          provenance: false

@@ -268,10 +268,14 @@ function requestHandler(req, res) {
 
 const server = http.createServer(requestHandler);
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function startServer() {
   server.listen(config.port, config.host, () => {
     console.log(`claude-anthropic-proxy listening on http://${config.host}:${config.port}`);
   });
 }
 
-export { server, requestHandler };
+if (import.meta.url === `file://${process.argv[1]}`) {
+  startServer();
+}
+
+export { config, server, requestHandler, startServer };

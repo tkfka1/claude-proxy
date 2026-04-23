@@ -52,6 +52,13 @@ cp .env.example .env
 
 `.env` 는 자동 로드됩니다. (`dotenv` 적용)
 
+전역 커맨드로 쓰려면:
+
+```bash
+npm install -g claude-anthropic-proxy
+claude-anthropic-proxy
+```
+
 ---
 
 ## 빠른 시작
@@ -207,8 +214,11 @@ CLAUDE_MODEL_MAP_JSON={"claude-sonnet-4-20250514":"sonnet","claude-opus-4-202505
 make install
 make start
 make test
+make pack-dry-run
 make health
 make docker-build
+make docker-buildx
+make docker-buildx-push
 make docker-run
 make helm-lint
 make helm-template
@@ -217,6 +227,67 @@ make compose-down
 make compose-logs
 make pm2-start
 make pm2-restart
+```
+
+---
+
+## 릴리즈 / 배포 자동화
+
+추가된 GitHub Actions:
+
+- `.github/workflows/ci.yml`
+  - Node 20 / 22 / 24 테스트
+  - `npm pack --dry-run` 으로 npm 배포 산출물 검증
+  - Helm lint / template 검증
+  - `linux/amd64`, `linux/arm64` Docker 빌드 검증
+- `.github/workflows/release.yml`
+  - `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
+  - npm 패키지 publish
+  - GitHub Release 생성
+  - GHCR 멀티아키 이미지(`linux/amd64`, `linux/arm64`) push
+  - 선택적으로 Docker Hub도 같이 push
+
+### 릴리즈 절차
+
+1. `main` 에 머지
+2. `package.json` 버전 확인
+3. 태그 생성 및 push
+
+```bash
+git checkout main
+git pull --ff-only
+git tag v0.1.0
+git push origin main --tags
+```
+
+### npm publish 인증
+
+기본 권장값은 npm trusted publishing 입니다.
+
+- npm 패키지 설정에서 GitHub Actions trusted publisher 추가
+- workflow 파일명은 **정확히** `.github/workflows/release.yml` 이어야 함
+- `package.json` 의 `repository.url` 이 GitHub 저장소와 정확히 일치해야 함
+
+토큰 방식 fallback 도 지원합니다.
+
+- `NPM_TOKEN` GitHub Actions secret 추가 시 token 기반 publish 사용
+
+### 컨테이너 이미지
+
+기본 push 대상:
+
+- `ghcr.io/tkfka1/claude-proxy`
+
+선택 push 대상:
+
+- Docker Hub (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` secret 이 둘 다 있을 때만 활성화)
+
+로컬 multi-arch 예시:
+
+```bash
+make docker-buildx DOCKER_PLATFORM=linux/amd64
+make docker-buildx DOCKER_PLATFORM=linux/arm64
+make docker-buildx-push DOCKER_IMAGE=ghcr.io/tkfka1/claude-proxy DOCKER_TAG=v0.1.0
 ```
 
 ---
@@ -326,6 +397,13 @@ journalctl -u claude-anthropic-proxy -f
 docker build -t claude-anthropic-proxy .
 ```
 
+Buildx 로 아키텍처별 빌드:
+
+```bash
+docker buildx build --platform linux/amd64 -t claude-anthropic-proxy:amd64 --load .
+docker buildx build --platform linux/arm64 -t claude-anthropic-proxy:arm64 --load .
+```
+
 ### 실행
 
 호스트의 Claude 로그인 정보를 재사용하려면 `~/.claude` 를 마운트해야 합니다.
@@ -336,6 +414,16 @@ docker run --rm \
   --env-file .env \
   -v "$HOME/.claude:/home/node/.claude:ro" \
   claude-anthropic-proxy
+```
+
+릴리즈 후 GHCR 이미지 사용 예시:
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  --env-file .env \
+  -v "$HOME/.claude:/home/node/.claude:ro" \
+  ghcr.io/tkfka1/claude-proxy:latest
 ```
 
 ---

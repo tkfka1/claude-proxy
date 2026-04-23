@@ -4,9 +4,38 @@
   "description": "Anthropic Messages API-compatible proxy backed by claude-cli",
   "type": "module",
   "main": "src/server.js",
+  "bin": {
+    "claude-anthropic-proxy": "./bin/claude-anthropic-proxy.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    ".env.example",
+    "README.md"
+  ],
   "scripts": {
+    "pack:dry-run": "npm pack --dry-run",
     "start": "node src/server.js",
+    "start:bin": "claude-anthropic-proxy",
     "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "anthropic",
+    "claude",
+    "messages-api",
+    "proxy",
+    "server"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tkfka1/claude-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tkfka1/claude-proxy/issues"
+  },
+  "homepage": "https://github.com/tkfka1/claude-proxy#readme",
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20"
