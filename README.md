@@ -242,7 +242,7 @@ make pm2-restart
   - `linux/amd64`, `linux/arm64` Docker 빌드 검증
 - `.github/workflows/release.yml`
   - `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
-  - npm 패키지 publish
+  - `NPM_TOKEN` 이 있을 때만 npm 패키지 publish
   - GitHub Release 생성
   - GHCR 멀티아키 이미지(`linux/amd64`, `linux/arm64`) push
   - 선택적으로 Docker Hub도 같이 push
@@ -262,9 +262,14 @@ git push origin main --tags
 
 ### npm publish 인증
 
-기본 권장값은 npm trusted publishing 입니다.
+기본 동작은 **npm optional** 입니다.
 
-- npm 패키지 설정에서 GitHub Actions trusted publisher 추가
+- `NPM_TOKEN` secret 이 있으면 release workflow 에서 npm publish 수행
+- `NPM_TOKEN` 이 없으면 npm publish 는 자동으로 skip 되고, GitHub Release + 컨테이너 릴리즈만 진행
+
+최초 npm 배포가 아직 없는 패키지는 trusted publishing 만으로 바로 시작할 수 없습니다.
+
+- npm trusted publishing 설정 전에는 token 기반 첫 배포가 필요할 수 있음
 - workflow 파일명은 **정확히** `.github/workflows/release.yml` 이어야 함
 - `package.json` 의 `repository.url` 이 GitHub 저장소와 정확히 일치해야 함
 
