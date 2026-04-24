@@ -7,9 +7,43 @@ function truncateText(value, maxLength = 600) {
   return `${text.slice(0, maxLength)}…`;
 }
 
-function sanitizeDetails(value, depth = 0) {
+function redactClient(value) {
+  const text = String(value ?? '');
+  if (text.includes(':')) {
+    return '[redacted-client]';
+  }
+
+  const segments = text.split('.');
+  if (segments.length === 4) {
+    return `${segments[0]}.${segments[1]}.${segments[2]}.x`;
+  }
+
+  return '[redacted-client]';
+}
+
+function redactEmail(value) {
+  const text = String(value ?? '');
+  const atIndex = text.indexOf('@');
+  if (atIndex <= 1) {
+    return '[redacted-email]';
+  }
+
+  return `${text.slice(0, 1)}***${text.slice(atIndex)}`;
+}
+
+function sanitizeDetails(value, depth = 0, key = '') {
   if (value == null) return value;
   if (depth >= 4) return '[depth-limit]';
+
+  if (typeof key === 'string') {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === 'client' || normalizedKey.endsWith('_client')) {
+      return redactClient(value);
+    }
+    if (normalizedKey === 'email' || normalizedKey.endsWith('_email')) {
+      return redactEmail(value);
+    }
+  }
 
   if (typeof value === 'string') {
     return truncateText(value);
@@ -27,14 +61,14 @@ function sanitizeDetails(value, depth = 0) {
   }
 
   if (Array.isArray(value)) {
-    return value.slice(0, 20).map((item) => sanitizeDetails(item, depth + 1));
+    return value.slice(0, 20).map((item) => sanitizeDetails(item, depth + 1, key));
   }
 
   if (typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
         .slice(0, 20)
-        .map(([key, item]) => [key, sanitizeDetails(item, depth + 1)]),
+        .map(([childKey, item]) => [childKey, sanitizeDetails(item, depth + 1, childKey)]),
     );
   }
 
@@ -108,6 +142,12 @@ export function createRecentLogStore({ limit = 200, storage = null } = {}) {
         lastError: persistence.lastError,
         lastSavedAt: persistence.lastSavedAt,
         entryCount: entries.length,
+      };
+    },
+    getPublicStatus() {
+      return {
+        enabled: persistence.enabled,
+        healthy: persistence.healthy,
       };
     },
     clear() {

@@ -83,7 +83,7 @@ function buildServiceMetadata() {
     web_login_enabled: isWebLoginEnabled(),
     proxy_api_key_configured: buildProxyApiKeySettings().configured,
     logs_path: '/logs/recent',
-    log_store: recentLogStore.getStatus(),
+    log_store: recentLogStore.getPublicStatus(),
     message_execution: messageConcurrencyManager.getStatus(),
     claude_auth_paths: {
       status: '/claude-auth/status',

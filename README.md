@@ -216,6 +216,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 빈 값 대신 8자 이상 문자열만 허용
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
 - 최근 로그도 state 파일에 저장되므로 재시작 후 다시 볼 수 있음
+- 최근 로그가 파일에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
   - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`

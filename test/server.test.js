@@ -18,6 +18,7 @@ process.env.WEB_SESSION_TTL_HOURS = '12';
 process.env.WEB_LOGIN_MAX_ATTEMPTS = '2';
 process.env.WEB_LOGIN_WINDOW_MINUTES = '1';
 process.env.PROXY_STATE_FILE = path.join(tempDir, 'proxy-runtime-state.json');
+process.env.RECENT_LOG_FILE = path.join(tempDir, 'recent-log.json');
 process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(tempDir, 'mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 
@@ -136,6 +137,9 @@ test('GET / keeps JSON metadata for non-browser clients', async () => {
   assert.equal(body.service, 'claude-anthropic-proxy');
   assert.equal(body.web_login_enabled, true);
   assert.equal(body.docs_path, '/docs');
+  assert.equal(body.log_store.enabled, true);
+  assert.equal(body.log_store.healthy, true);
+  assert.equal('lastError' in body.log_store, false);
 });
 
 test('GET / honors Accept quality for JSON clients', async () => {

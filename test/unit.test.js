@@ -220,3 +220,29 @@ test('recent log store persists and reloads entries', () => {
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
+
+test('recent log store redacts sensitive fields before persistence', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-logs-redact-'));
+  const storage = createRecentLogFileStore({
+    filePath: path.join(tempDir, 'recent-log.json'),
+  });
+
+  const store = createRecentLogStore({
+    limit: 5,
+    storage,
+  });
+  store.add('warn', 'docs login failed', {
+    client: '203.0.113.10',
+    email: 'user@example.com',
+  });
+
+  const [entry] = storage.loadEntries();
+  assert.equal(entry.details.client, '203.0.113.x');
+  assert.equal(entry.details.email, 'u***@example.com');
+  assert.deepEqual(store.getPublicStatus(), {
+    enabled: true,
+    healthy: true,
+  });
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
