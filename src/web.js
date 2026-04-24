@@ -426,14 +426,15 @@ export function renderHomePage(config) {
             </label>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
               <button id="proxy-api-key-submit" type="submit">x-api-key 저장</button>
-              <button id="proxy-api-key-generate" type="button" class="secondary">랜덤 생성</button>
+              <button id="proxy-api-key-reset" type="button" class="secondary">리셋</button>
             </div>
           </form>
         </article>
         <article class="panel">
           <h2>현재 키 / 전달 메모</h2>
           <p class="muted">
-            저장 직후에는 새 키 원문을 한 번 보여줍니다. 이후 새로고침하면 마스킹된 상태만 보입니다.
+            문서 로그인 상태에서는 현재 x-api-key 원문을 볼 수 있습니다.
+            리셋은 새 랜덤 키를 즉시 발급하고 이전 키는 바로 무효화합니다.
           </p>
           <pre id="proxy-api-key-preview">현재 설정된 x-api-key 가 없습니다.</pre>
         </article>
@@ -522,7 +523,7 @@ export function renderHomePage(config) {
         const proxyApiKeyForm = document.getElementById('proxy-api-key-form');
         const proxyApiKeyInput = document.getElementById('proxy-api-key-input');
         const proxyApiKeySubmit = document.getElementById('proxy-api-key-submit');
-        const proxyApiKeyGenerate = document.getElementById('proxy-api-key-generate');
+        const proxyApiKeyReset = document.getElementById('proxy-api-key-reset');
         const messageExamplePre = document.getElementById('message-example');
         const streamExamplePre = document.getElementById('stream-example');
 
@@ -580,7 +581,7 @@ export function renderHomePage(config) {
           return lines.join('\\n');
         }
 
-        function renderProxyApiKeyState(settings, revealedApiKey) {
+        function renderProxyApiKeyState(settings, apiKey) {
           proxyApiKeyConfigured = Boolean(settings && settings.configured);
           proxyApiKeyHeaderRequired = Boolean(settings && settings.headerRequired);
           proxyApiKeySummary.innerHTML = proxyApiKeyConfigured
@@ -593,8 +594,8 @@ export function renderHomePage(config) {
             : proxyApiKeyHeaderRequired
               ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 요청에는 x-api-key 헤더가 필요합니다.'
               : '아직 런타임 x-api-key 가 없습니다. 저장하면 이후 /v1/messages 요청에 헤더가 필요합니다.';
-          proxyApiKeyPreview.textContent = revealedApiKey
-            ? '새 x-api-key\\n' + revealedApiKey
+          proxyApiKeyPreview.textContent = apiKey
+            ? '현재 x-api-key\\n' + apiKey
             : proxyApiKeyConfigured
               ? '현재 마스킹된 값\\n' + (settings.maskedApiKey || '')
               : '현재 설정된 x-api-key 가 없습니다.';
@@ -610,13 +611,13 @@ export function renderHomePage(config) {
         function syncProxyApiKeyButtons(disabled) {
           proxyApiKeyInput.disabled = disabled;
           proxyApiKeySubmit.disabled = disabled;
-          proxyApiKeyGenerate.disabled = disabled;
+          proxyApiKeyReset.disabled = disabled;
         }
 
         async function refreshProxyApiKeyState() {
           try {
             const payload = await fetchJson('/proxy-api-key');
-            renderProxyApiKeyState(payload.settings);
+            renderProxyApiKeyState(payload.settings, payload.apiKey);
           } catch (error) {
             proxyApiKeySummary.innerHTML = '<strong>x-api-key 상태 확인 실패</strong>';
             proxyApiKeyDetail.textContent = error.message;
@@ -645,7 +646,7 @@ export function renderHomePage(config) {
           }
         });
 
-        proxyApiKeyGenerate.addEventListener('click', async () => {
+        proxyApiKeyReset.addEventListener('click', async () => {
           syncProxyApiKeyButtons(true);
           try {
             const payload = await fetchJson('/proxy-api-key', {
@@ -654,7 +655,7 @@ export function renderHomePage(config) {
                 'content-type': 'application/json',
               },
               body: JSON.stringify({
-                generate: true,
+                reset: true,
               }),
             });
             proxyApiKeyInput.value = '';

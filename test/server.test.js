@@ -180,6 +180,7 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /\/claude-auth\/status/);
   assert.match(body, /SSO 강제 사용/);
   assert.match(body, /x-api-key 저장/);
+  assert.match(body, /리셋/);
   assert.match(body, /\/proxy-api-key/);
 });
 
@@ -353,31 +354,47 @@ test('POST /proxy-api-key updates the runtime x-api-key after docs login', async
   assert.equal(statusBody.settings.configured, true);
   assert.equal(statusBody.settings.headerRequired, true);
   assert.equal(statusBody.settings.maskedApiKey, 'runt…ey');
-  assert.equal('apiKey' in statusBody, false);
+  assert.equal(statusBody.apiKey, 'runtime-secret-key');
 });
 
-test('POST /proxy-api-key can generate a runtime key and /v1/messages starts requiring it', async () => {
+test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts requiring it', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
   const cookie = await loginDocs(baseUrl);
 
-  const updateResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+  const firstResponse = await fetch(`${baseUrl}/proxy-api-key`, {
     method: 'POST',
     headers: {
       cookie,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      generate: true,
+      apiKey: 'runtime-secret-key',
     }),
   });
 
-  assert.equal(updateResponse.status, 200);
-  const updateBody = await updateResponse.json();
-  assert.equal(updateBody.ok, true);
-  assert.equal(updateBody.settings.configured, true);
-  assert.equal(updateBody.settings.headerRequired, true);
-  assert.match(updateBody.apiKey, /^[A-Za-z0-9_-]{20,}$/);
+  assert.equal(firstResponse.status, 200);
+  const firstBody = await firstResponse.json();
+  assert.equal(firstBody.apiKey, 'runtime-secret-key');
+
+  const resetResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      reset: true,
+    }),
+  });
+
+  assert.equal(resetResponse.status, 200);
+  const resetBody = await resetResponse.json();
+  assert.equal(resetBody.ok, true);
+  assert.equal(resetBody.settings.configured, true);
+  assert.equal(resetBody.settings.headerRequired, true);
+  assert.match(resetBody.apiKey, /^[A-Za-z0-9_-]{20,}$/);
+  assert.notEqual(resetBody.apiKey, 'runtime-secret-key');
 
   const missingHeaderResponse = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
@@ -396,12 +413,30 @@ test('POST /proxy-api-key can generate a runtime key and /v1/messages starts req
   const missingHeaderBody = await missingHeaderResponse.json();
   assert.equal(missingHeaderBody.error.message, 'x-api-key header is required');
 
+  const oldKeyResponse = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': 'runtime-secret-key',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(oldKeyResponse.status, 401);
+  const oldKeyBody = await oldKeyResponse.json();
+  assert.equal(oldKeyBody.error.message, 'Invalid API key');
+
   const okResponse = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
-      'x-api-key': updateBody.apiKey,
+      'x-api-key': resetBody.apiKey,
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',

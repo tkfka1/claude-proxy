@@ -527,6 +527,7 @@ function handleProxyApiKeyStatus(req, res) {
   json(res, 200, {
     ok: true,
     settings: buildProxyApiKeySettings(),
+    apiKey: proxyApiKeyManager.getApiKey() || null,
   });
 }
 
@@ -537,7 +538,7 @@ async function handleProxyApiKeyUpdate(req, res) {
 
   try {
     const body = await readJsonBody(req, 16 * 1024);
-    const next = body?.generate
+    const next = body?.reset || body?.generate
       ? proxyApiKeyManager.generateNewApiKey()
       : proxyApiKeyManager.setApiKey(body?.apiKey);
 
