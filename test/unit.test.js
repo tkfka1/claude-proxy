@@ -382,6 +382,7 @@ test('redis message concurrency manager enforces a global semaphore with local q
     keyPrefix: 'claude-proxy-test',
     maxConcurrent: 1,
     maxQueued: 1,
+    maxWaitMs: 1_000,
     pollIntervalMs: 10,
     leaseMs: 100,
   });
@@ -401,6 +402,26 @@ test('redis message concurrency manager enforces a global semaphore with local q
   await new Promise((resolve) => setTimeout(resolve, 20));
   const finalStatus = await manager.getLiveStatus();
   assert.equal(finalStatus.globalActive, 0);
+});
+
+test('redis message concurrency manager times out queued requests', async () => {
+  const client = new FakeRedisSemaphoreClient();
+  const manager = createRedisMessageConcurrencyManager({
+    client,
+    keyPrefix: 'claude-proxy-timeout',
+    maxConcurrent: 1,
+    maxQueued: 1,
+    maxWaitMs: 30,
+    pollIntervalMs: 10,
+    leaseMs: 100,
+  });
+
+  const first = await manager.acquire({ requestId: 'req_1' });
+  await assert.rejects(
+    () => manager.acquire({ requestId: 'req_2' }),
+    /Timed out waiting 30ms/,
+  );
+  first.release();
 });
 
 test('redis state store saves and loads proxy state plus recent logs', async () => {

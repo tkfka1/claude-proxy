@@ -38,6 +38,7 @@ export function loadConfig() {
   const webLoginWindowMinutes = parseIntegerEnv('WEB_LOGIN_WINDOW_MINUTES', 15);
   const maxConcurrentMessageRequests = parseIntegerEnv('MAX_CONCURRENT_MESSAGE_REQUESTS', 4);
   const maxQueuedMessageRequests = parseIntegerEnv('MAX_QUEUED_MESSAGE_REQUESTS', 16);
+  const maxMessageQueueWaitMs = parseIntegerEnv('MAX_MESSAGE_QUEUE_WAIT_MS', 30_000);
   const recentLogLimit = parseIntegerEnv('RECENT_LOG_LIMIT', 200);
 
   if (!Array.isArray(extraArgs)) {
@@ -62,6 +63,10 @@ export function loadConfig() {
 
   if (maxQueuedMessageRequests < 0) {
     throw new Error('MAX_QUEUED_MESSAGE_REQUESTS must be 0 or greater');
+  }
+
+  if (maxMessageQueueWaitMs < 0) {
+    throw new Error('MAX_MESSAGE_QUEUE_WAIT_MS must be 0 or greater');
   }
 
   if (recentLogLimit <= 0) {
@@ -92,6 +97,7 @@ export function loadConfig() {
     enableRequestLogging: parseBooleanEnv('ENABLE_REQUEST_LOGGING', true),
     maxConcurrentMessageRequests,
     maxQueuedMessageRequests,
+    maxMessageQueueWaitMs,
     recentLogLimit,
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',

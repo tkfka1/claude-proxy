@@ -169,6 +169,7 @@ curl -N http://localhost:8080/v1/messages \
 - `ENABLE_REQUEST_LOGGING`: stdout 요청 로그 출력 여부
 - `MAX_CONCURRENT_MESSAGE_REQUESTS`: 동시에 실행할 `/v1/messages` 개수(기본값 `4`, `0`이면 무제한)
 - `MAX_QUEUED_MESSAGE_REQUESTS`: 실행 슬롯을 기다릴 큐 길이(기본값 `16`)
+- `MAX_MESSAGE_QUEUE_WAIT_MS`: 큐에서 기다릴 최대 시간(ms). 초과 시 `429 rate_limit_error` 반환 (기본값 `30000`, `0`이면 무기한 대기)
 - `RECENT_LOG_LIMIT`: `/docs` 와 `/logs/recent` 에서 유지할 최근 로그 개수(기본값 `200`)
 - `REDIS_URL`: Redis backend 주소. 설정하면 x-api-key state / recent logs 가 Redis로 이동
 - `REDIS_KEY_PREFIX`: Redis key prefix (기본값 `claude-anthropic-proxy`)
@@ -232,6 +233,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 
 - `/v1/messages` 는 설정한 동시성 제한 안에서만 `claude` child process 를 실행
 - 슬롯이 꽉 차면 큐에서 기다리고, 큐까지 다 차면 `429 rate_limit_error` 반환
+- 큐에서 `MAX_MESSAGE_QUEUE_WAIT_MS` 를 넘기면 `429 rate_limit_error` 로 timeout 반환
 - 스트리밍 요청도 동일한 슬롯을 점유하므로 오래 걸리는 응답이 많으면 큐 대기가 늘어날 수 있음
 - 현재 상태는 `/docs` 의 최근 로그 패널 또는 `GET /logs/recent` 에서 확인 가능
 - 기본 파일 backend에서는 동시성 제한이 **현재 프로세스/Pod 기준**

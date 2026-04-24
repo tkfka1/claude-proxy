@@ -105,12 +105,14 @@ export function createRedisMessageConcurrencyManager({
   keyPrefix,
   maxConcurrent = 4,
   maxQueued = 16,
+  maxWaitMs = 30_000,
   onEvent = null,
   leaseMs = DEFAULT_LEASE_MS,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 } = {}) {
   let currentMaxConcurrent = maxConcurrent;
   let currentMaxQueued = maxQueued;
+  let currentMaxWaitMs = maxWaitMs;
   let localActive = 0;
   let localQueued = 0;
   let globalActive = 0;
@@ -127,6 +129,7 @@ export function createRedisMessageConcurrencyManager({
       enabled: currentMaxConcurrent > 0,
       maxConcurrent: currentMaxConcurrent,
       maxQueued: currentMaxQueued,
+      maxWaitMs: currentMaxWaitMs,
       active: localActive,
       queued: localQueued,
       globalActive,
@@ -253,6 +256,33 @@ export function createRedisMessageConcurrencyManager({
           }
 
           try {
+            if (currentMaxWaitMs > 0 && Date.now() - enqueuedAt >= currentMaxWaitMs) {
+              settled = true;
+              if (waiting) {
+                localQueued = Math.max(0, localQueued - 1);
+              }
+              cleanup();
+              try {
+                const [queueCount] = await runEval(client, CANCEL_QUEUE_SCRIPT, [queueKey, queueHeartbeatKey], [token]);
+                globalQueued = Number(queueCount);
+              } catch (cancelError) {
+                emit('redis_error', { requestId, token, error: cancelError.message });
+              }
+              emit('rejected', {
+                requestId,
+                token,
+                reason: 'queue_timeout',
+              });
+              reject(
+                new ProxyError(
+                  429,
+                  'rate_limit_error',
+                  `Timed out waiting ${currentMaxWaitMs}ms for a /v1/messages execution slot. Please retry shortly.`,
+                ),
+              );
+              return;
+            }
+
             const [statusCode, queueCount, activeCount, queuePosition] = await runEval(
               client,
               ACQUIRE_OR_QUEUE_SCRIPT,
@@ -344,9 +374,10 @@ export function createRedisMessageConcurrencyManager({
         void attempt();
       });
     },
-    configure({ maxConcurrent, maxQueued }) {
+    configure({ maxConcurrent, maxQueued, maxWaitMs }) {
       currentMaxConcurrent = maxConcurrent;
       currentMaxQueued = maxQueued;
+      currentMaxWaitMs = maxWaitMs;
     },
     getStatus() {
       return snapshot();

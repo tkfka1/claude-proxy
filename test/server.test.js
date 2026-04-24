@@ -110,6 +110,7 @@ test.beforeEach(async () => {
   messageConcurrencyManager.configure({
     maxConcurrent: config.maxConcurrentMessageRequests,
     maxQueued: config.maxQueuedMessageRequests,
+    maxWaitMs: config.maxMessageQueueWaitMs,
   });
   recentLogStore.clear();
   await recentLogStore.flush();
@@ -531,6 +532,7 @@ test('POST /v1/messages enforces configurable concurrency and queue limits', asy
   messageConcurrencyManager.configure({
     maxConcurrent: 1,
     maxQueued: 1,
+    maxWaitMs: 1_000,
   });
 
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
@@ -572,12 +574,58 @@ test('POST /v1/messages enforces configurable concurrency and queue limits', asy
   assert.ok(logBody.entries.some((entry) => entry.event === 'message concurrency rejected'));
 });
 
+test('POST /v1/messages queue timeout returns 429 when a slot does not open in time', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'delayed reply';
+  process.env.MOCK_CLAUDE_DELAY_MS = '200';
+  messageConcurrencyManager.configure({
+    maxConcurrent: 1,
+    maxQueued: 1,
+    maxWaitMs: 50,
+  });
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const first = fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello 1' }],
+    }),
+  });
+
+  const second = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello 2' }],
+    }),
+  });
+
+  const firstResponse = await first;
+  assert.equal(firstResponse.status, 200);
+  assert.equal(second.status, 429);
+  const body = await second.json();
+  assert.equal(body.error.type, 'rate_limit_error');
+  assert.match(body.error.message, /Timed out waiting 50ms/);
+});
+
 test('stream disconnect is logged as aborted and frees the execution slot', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'stream reply';
   process.env.MOCK_CLAUDE_STREAM_DELAY_MS = '150';
   messageConcurrencyManager.configure({
     maxConcurrent: 1,
     maxQueued: 1,
+    maxWaitMs: 1_000,
   });
 
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();

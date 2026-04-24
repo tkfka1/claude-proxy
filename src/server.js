@@ -67,6 +67,7 @@ const messageConcurrencyManager = stateBackend
       keyPrefix: config.redisKeyPrefix,
       maxConcurrent: config.maxConcurrentMessageRequests,
       maxQueued: config.maxQueuedMessageRequests,
+      maxWaitMs: config.maxMessageQueueWaitMs,
       onEvent(type, payload) {
         const levels = {
           queued: 'info',
@@ -82,6 +83,7 @@ const messageConcurrencyManager = stateBackend
   : createMessageConcurrencyManager({
       maxConcurrent: config.maxConcurrentMessageRequests,
       maxQueued: config.maxQueuedMessageRequests,
+      maxWaitMs: config.maxMessageQueueWaitMs,
       onEvent(type, payload) {
         const levels = {
           queued: 'info',

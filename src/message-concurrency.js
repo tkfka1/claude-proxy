@@ -5,13 +5,23 @@ function abortQueueEntry(entry) {
   if (entry.signal && entry.abortHandler) {
     entry.signal.removeEventListener('abort', entry.abortHandler);
   }
+  if (entry.timeoutId) {
+    clearTimeout(entry.timeoutId);
+    entry.timeoutId = null;
+  }
 }
 
-export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued = 16, onEvent = null } = {}) {
+export function createMessageConcurrencyManager({
+  maxConcurrent = 4,
+  maxQueued = 16,
+  maxWaitMs = 30_000,
+  onEvent = null,
+} = {}) {
   let active = 0;
   let queue = [];
   let currentMaxConcurrent = maxConcurrent;
   let currentMaxQueued = maxQueued;
+  let currentMaxWaitMs = maxWaitMs;
 
   function emit(type, payload = {}) {
     onEvent?.(type, {
@@ -29,6 +39,7 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
       enabled: currentMaxConcurrent > 0,
       maxConcurrent: currentMaxConcurrent,
       maxQueued: currentMaxQueued,
+      maxWaitMs: currentMaxWaitMs,
       active,
       queued: queue.length,
     };
@@ -116,6 +127,7 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
           reject,
           signal,
           abortHandler: null,
+          timeoutId: null,
           cancelled: false,
         };
 
@@ -144,6 +156,27 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
           signal.addEventListener('abort', entry.abortHandler, { once: true });
         }
 
+        if (currentMaxWaitMs > 0) {
+          entry.timeoutId = setTimeout(() => {
+            const index = queue.indexOf(entry);
+            if (index !== -1) {
+              queue.splice(index, 1);
+            }
+            abortQueueEntry(entry);
+            emit('rejected', {
+              requestId,
+              reason: 'queue_timeout',
+            });
+            reject(
+              new ProxyError(
+                429,
+                'rate_limit_error',
+                `Timed out waiting ${currentMaxWaitMs}ms for a /v1/messages execution slot. Please retry shortly.`,
+              ),
+            );
+          }, currentMaxWaitMs);
+        }
+
         queue.push(entry);
         emit('queued', {
           requestId,
@@ -151,9 +184,10 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
         });
       });
     },
-    configure({ maxConcurrent, maxQueued }) {
+    configure({ maxConcurrent, maxQueued, maxWaitMs }) {
       currentMaxConcurrent = maxConcurrent;
       currentMaxQueued = maxQueued;
+      currentMaxWaitMs = maxWaitMs;
       dispatchNext();
     },
     getStatus,
