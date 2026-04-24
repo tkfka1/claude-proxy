@@ -20,6 +20,19 @@ podLabels: {}
 
 podSecurityContext: {}
 
+proxyState:
+  mountPath: /home/node/.local/state/claude-anthropic-proxy
+  fileName: runtime-state.json
+  persistence:
+    enabled: false
+    existingClaim: ""
+    allowSharedState: false
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: false

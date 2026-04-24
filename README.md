@@ -664,6 +664,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 - `charts/claude-anthropic-proxy/examples/external-secret.yaml`
 - `charts/claude-anthropic-proxy/examples/sealed-secret.yaml`
 - `charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml`
+- `charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml`
 - `charts/claude-anthropic-proxy/examples/clusterissuer-letsencrypt.yaml`
 
 ---

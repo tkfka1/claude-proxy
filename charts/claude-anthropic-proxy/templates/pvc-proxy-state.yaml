@@ -1,0 +1,21 @@
+{{- if and .Values.proxyState.persistence.enabled (not .Values.proxyState.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "claude-anthropic-proxy.proxyStateClaimName" . }}
+  labels:
+    {{- include "claude-anthropic-proxy.labels" . | nindent 4 }}
+  {{- with .Values.proxyState.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.proxyState.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.proxyState.persistence.size }}
+  {{- with .Values.proxyState.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

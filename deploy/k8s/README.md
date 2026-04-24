@@ -72,6 +72,18 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
+### `/docs` x-api-key 유지용 PVC 추가
+
+`/docs` 에서 저장한 x-api-key 를 재시작 후에도 유지하려면 PVC values 를 추가하세요.
+
+```bash
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml \
+./deploy/k8s/deploy-helm.sh
+```
+
+기본 예시는 single replica 기준입니다.
+여러 replica에서 공유 상태를 쓰려면 shared RWX 스토리지와 동시성 리스크를 직접 감수해야 합니다.
+
 ### 이미지/secret 이름 오버라이드
 
 ```bash

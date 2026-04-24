@@ -7,6 +7,7 @@
 - `examples/external-secret.yaml`: External Secrets Operator 예시
 - `examples/sealed-secret.yaml`: Bitnami SealedSecret 예시
 - `examples/values-ingress-cert-manager.yaml`: Ingress + cert-manager values 예시
+- `examples/values-proxy-state-pvc.yaml`: `/docs` 에서 바꾼 x-api-key 를 PVC에 유지하는 예시
 - `examples/clusterissuer-letsencrypt.yaml`: cert-manager ClusterIssuer 예시
 - `../../deploy/k8s/*.sh`: 실제 클러스터 배포용 helper script
 
@@ -77,6 +78,30 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
+## x-api-key state PVC 예시
+
+`/docs` 에서 바꾼 x-api-key 를 재시작 후에도 유지하려면 PVC를 붙여야 합니다.
+
+기본 안전장치는 single replica 기준입니다.
+`proxyState.persistence.enabled=true` 일 때는:
+
+- `replicaCount=1`
+- 또는 `autoscaling.minReplicas=1`
+
+이어야 하고, 여러 replica를 정말 써야 하면 `proxyState.persistence.allowSharedState=true` 를 명시해서
+shared filesystem/race 조건을 직접 감수해야 합니다.
+
+예:
+
+```bash
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set proxyApiKey.existingSecret=claude-proxy-env
+```
+
 ## ExternalSecret 예시
 
 `examples/external-secret.yaml` 은 `claude-auth` Secret을 외부 비밀 저장소에서 동기화하는 예시입니다.
@@ -126,6 +151,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `env.*`
 - `proxyApiKey.value`
 - `proxyApiKey.existingSecret`
+- `proxyState.persistence.*`
 - `claudeAuth.existingSecret`
 - `claudeAuth.createSecret`
 - `claudeAuth.mountPath`
@@ -144,6 +170,11 @@ env:
 
 proxyApiKey:
   existingSecret: claude-proxy-env
+
+proxyState:
+  persistence:
+    enabled: true
+    size: 1Gi
 
 service:
   type: ClusterIP

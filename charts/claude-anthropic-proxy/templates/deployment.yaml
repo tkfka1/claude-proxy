@@ -1,3 +1,6 @@
+{{- if and .Values.proxyState.persistence.enabled (not .Values.proxyState.persistence.allowSharedState) (or (and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) 1)) (and (not .Values.autoscaling.enabled) (gt (int .Values.replicaCount) 1))) }}
+{{- fail "proxyState.persistence.enabled requires a single replica unless proxyState.persistence.allowSharedState=true" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,9 +31,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "claude-anthropic-proxy.serviceAccountName" . }}
-      {{- with .Values.podSecurityContext }}
+      {{- if or .Values.proxyState.persistence.enabled .Values.podSecurityContext }}
       securityContext:
+        {{- if and .Values.proxyState.persistence.enabled (not (hasKey .Values.podSecurityContext "fsGroup")) }}
+        fsGroup: 1000
+        {{- end }}
+        {{- with .Values.podSecurityContext }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       containers:
         - name: {{ include "claude-anthropic-proxy.name" . }}
@@ -44,6 +52,10 @@ spec:
             {{- range $name, $value := .Values.env }}
             - name: {{ $name }}
               value: {{ printf "%v" $value | quote }}
+            {{- end }}
+            {{- if .Values.proxyState.persistence.enabled }}
+            - name: PROXY_STATE_FILE
+              value: {{ printf "%s/%s" .Values.proxyState.mountPath .Values.proxyState.fileName | quote }}
             {{- end }}
             {{- if .Values.proxyApiKey.existingSecret }}
             - name: PROXY_API_KEY
@@ -78,8 +90,12 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.extraVolumeMounts }}
+          {{- if or .Values.proxyState.persistence.enabled (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.extraVolumeMounts }}
           volumeMounts:
+            {{- if .Values.proxyState.persistence.enabled }}
+            - name: proxy-state
+              mountPath: {{ .Values.proxyState.mountPath }}
+            {{- end }}
             {{- if include "claude-anthropic-proxy.hasClaudeAuth" . }}
             - name: claude-auth
               mountPath: {{ .Values.claudeAuth.mountPath }}
@@ -89,8 +105,13 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-      {{- if or (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.extraVolumes }}
+      {{- if or .Values.proxyState.persistence.enabled (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.extraVolumes }}
       volumes:
+        {{- if .Values.proxyState.persistence.enabled }}
+        - name: proxy-state
+          persistentVolumeClaim:
+            claimName: {{ include "claude-anthropic-proxy.proxyStateClaimName" . }}
+        {{- end }}
         {{- if include "claude-anthropic-proxy.hasClaudeAuth" . }}
         - name: claude-auth
           secret:

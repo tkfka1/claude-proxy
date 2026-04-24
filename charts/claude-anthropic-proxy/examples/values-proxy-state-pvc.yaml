@@ -1,0 +1,10 @@
+replicaCount: 1
+
+autoscaling:
+  enabled: false
+
+proxyState:
+  persistence:
+    enabled: true
+    size: 1Gi
+

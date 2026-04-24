@@ -50,3 +50,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "claude-anthropic-proxy.hasClaudeAuth" -}}
 {{- if or .Values.claudeAuth.existingSecret .Values.claudeAuth.createSecret }}true{{- end }}
 {{- end }}
+
+{{- define "claude-anthropic-proxy.proxyStateClaimName" -}}
+{{- if .Values.proxyState.persistence.existingClaim }}
+{{- .Values.proxyState.persistence.existingClaim }}
+{{- else }}
+{{- printf "%s-proxy-state" (include "claude-anthropic-proxy.fullname" .) }}
+{{- end }}
+{{- end }}
