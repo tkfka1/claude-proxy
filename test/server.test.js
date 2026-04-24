@@ -98,6 +98,7 @@ test.beforeEach(() => {
   resetMockClaudeAuthState();
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
   delete process.env.MOCK_CLAUDE_DELAY_MS;
+  delete process.env.MOCK_CLAUDE_STREAM_DELAY_MS;
   config.proxyApiKey = '';
   proxyApiKeyManager.resetApiKey('');
   config.allowMissingApiKeyHeader = true;
@@ -510,6 +511,8 @@ test('GET /logs/recent returns recent entries and concurrency status for docs-au
   assert.equal(body.ok, true);
   assert.equal(body.messageExecution.maxConcurrent, config.maxConcurrentMessageRequests);
   assert.equal(body.messageExecution.maxQueued, config.maxQueuedMessageRequests);
+  assert.equal(body.logStore.enabled, true);
+  assert.equal(body.logStore.healthy, true);
   assert.ok(Array.isArray(body.entries));
   assert.ok(body.entries.some((entry) => entry.event === 'messages request completed'));
 });

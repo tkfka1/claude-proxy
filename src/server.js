@@ -21,7 +21,7 @@ import {
 import { createClaudeAuthManager } from './claude-auth.js';
 import { createMessageConcurrencyManager } from './message-concurrency.js';
 import { createProxyApiKeyManager } from './proxy-api-key.js';
-import { createProxyStateFileStore } from './proxy-state-file.js';
+import { createProxyStateFileStore, createRecentLogFileStore } from './proxy-state-file.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { verifyWebPassword } from './web-auth.js';
@@ -31,9 +31,13 @@ const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
-const recentLogStore = createRecentLogStore({ limit: config.recentLogLimit });
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
 const proxyStateFileStore = createProxyStateFileStore({ filePath: config.proxyStateFile });
+const recentLogFileStore = createRecentLogFileStore({ filePath: config.recentLogFile });
+const recentLogStore = createRecentLogStore({
+  limit: config.recentLogLimit,
+  storage: recentLogFileStore,
+});
 const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
   storage: proxyStateFileStore,
@@ -79,6 +83,7 @@ function buildServiceMetadata() {
     web_login_enabled: isWebLoginEnabled(),
     proxy_api_key_configured: buildProxyApiKeySettings().configured,
     logs_path: '/logs/recent',
+    log_store: recentLogStore.getStatus(),
     message_execution: messageConcurrencyManager.getStatus(),
     claude_auth_paths: {
       status: '/claude-auth/status',
@@ -608,6 +613,7 @@ function handleRecentLogs(req, res) {
   json(res, 200, {
     ok: true,
     entries: recentLogStore.list(),
+    logStore: recentLogStore.getStatus(),
     messageExecution: messageConcurrencyManager.getStatus(),
   }, {
     'cache-control': 'no-store',
@@ -1022,6 +1028,7 @@ export {
   config,
   messageConcurrencyManager,
   proxyApiKeyManager,
+  recentLogFileStore,
   proxyStateFileStore,
   recentLogStore,
   server,

@@ -22,8 +22,11 @@ import {
 } from '../src/proxy-api-key.js';
 import {
   createProxyStateFileStore,
+  createRecentLogFileStore,
   resolveProxyStateFile,
+  resolveRecentLogFile,
 } from '../src/proxy-state-file.js';
+import { createRecentLogStore } from '../src/recent-log-store.js';
 
 test('buildClaudePrompt formats conversation history', () => {
   const prompt = buildClaudePrompt([
@@ -168,6 +171,11 @@ test('resolveProxyStateFile uses explicit env path when provided', () => {
   assert.match(resolved, /tmp[\\/]+runtime-state\.json$/);
 });
 
+test('resolveRecentLogFile uses explicit env path when provided', () => {
+  const resolved = resolveRecentLogFile('./tmp/recent-log.json');
+  assert.match(resolved, /tmp[\\/]+recent-log\.json$/);
+});
+
 test('proxy api key manager refuses a corrupt persisted state file even when env bootstrap exists', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-'));
   const filePath = path.join(tempDir, 'runtime-state.json');
@@ -182,6 +190,33 @@ test('proxy api key manager refuses a corrupt persisted state file even when env
       }),
     /Failed to load persisted proxy API key state/,
   );
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('recent log store persists and reloads entries', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-logs-'));
+  const storage = createRecentLogFileStore({
+    filePath: path.join(tempDir, 'recent-log.json'),
+  });
+
+  const store = createRecentLogStore({
+    limit: 5,
+    storage,
+  });
+  store.add('info', 'messages request', { requestId: 'req_1' });
+  store.add('warn', 'messages request aborted', { requestId: 'req_2' });
+
+  const reloaded = createRecentLogStore({
+    limit: 5,
+    storage,
+  });
+  const entries = reloaded.list();
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].event, 'messages request aborted');
+  assert.equal(entries[1].event, 'messages request');
+  assert.equal(reloaded.getStatus().enabled, true);
+  assert.equal(reloaded.getStatus().healthy, true);
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });

@@ -170,6 +170,7 @@ curl -N http://localhost:8080/v1/messages \
 - `MAX_CONCURRENT_MESSAGE_REQUESTS`: 동시에 실행할 `/v1/messages` 개수(기본값 `4`, `0`이면 무제한)
 - `MAX_QUEUED_MESSAGE_REQUESTS`: 실행 슬롯을 기다릴 큐 길이(기본값 `16`)
 - `RECENT_LOG_LIMIT`: `/docs` 와 `/logs/recent` 에서 유지할 최근 로그 개수(기본값 `200`)
+- `RECENT_LOG_FILE`: 최근 로그를 영속 저장할 파일 경로. 비우면 state 디렉터리의 `recent-log.json` 사용
 
 ### 웹 문서 로그인 설정
 
@@ -214,9 +215,13 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, 상태 파일이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
+- 최근 로그도 state 파일에 저장되므로 재시작 후 다시 볼 수 있음
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
   - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`
+- 최근 로그 저장 경로는 `RECENT_LOG_FILE` 이 비어 있으면
+  - `$XDG_STATE_HOME/claude-anthropic-proxy/recent-log.json`
+  - 또는 `$HOME/.local/state/claude-anthropic-proxy/recent-log.json`
 - 컨테이너 환경에서는 이 경로에 볼륨을 붙여야 재시작 후에도 유지됨
 
 ### 메시지 동시성 / 큐

@@ -83,7 +83,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 
 ## x-api-key state PVC 예시
 
-`/docs` 에서 바꾼 x-api-key 를 재시작 후에도 유지하려면 PVC를 붙여야 합니다.
+`/docs` 에서 바꾼 x-api-key 와 최근 로그를 재시작 후에도 유지하려면 PVC를 붙여야 합니다.
 
 `values-prod.yaml` 자체가 이미 PVC 친화적인 single replica 시작점입니다.
 아래 예시는 기본값을 더 작은 values 파일로 켜는 예시입니다.
