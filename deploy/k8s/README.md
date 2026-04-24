@@ -81,7 +81,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 
 `values-prod.yaml` 는 이제 Redis 친화적인 단일 replica 시작점입니다.
 
-- chart 내부 Redis가 같이 뜨고 `/docs` 에서 저장한 x-api-key 가 Redis에 유지됨
+- chart 내부 Redis가 같이 뜨고 `/docs` 에서 저장한 x-api-key, 최근 로그, 로그인 세션/시도 제한이 Redis에 유지됨
 - `/v1/messages` 실행 슬롯도 Redis 기준으로 공유되므로 여러 pod에서 active concurrency를 같이 셈
 - 대기열도 Redis에 올라가지만, pod 하나가 너무 많은 대기 요청을 쌓지 않게 local queue cap도 같이 유지
 - 초기엔 `/v1/messages` 가 잠겨 있고

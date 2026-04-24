@@ -48,6 +48,35 @@ function parseRecentLogEntries(raw) {
     }));
 }
 
+function parseWebSession(raw) {
+  const payload = JSON.parse(raw);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Persisted Redis web session must be a JSON object');
+  }
+
+  const expiresAt = Number(payload.expiresAt);
+  if (!Number.isFinite(expiresAt)) {
+    throw new Error('Persisted Redis web session must include numeric expiresAt');
+  }
+
+  return {
+    expiresAt,
+  };
+}
+
+function parseWebLoginAttempt(raw) {
+  const payload = JSON.parse(raw);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Persisted Redis web login attempt must be a JSON object');
+  }
+
+  return {
+    count: Number(payload.count || 0),
+    windowStartedAt: Number(payload.windowStartedAt || 0),
+    blockedUntil: Number(payload.blockedUntil || 0),
+  };
+}
+
 export async function createRedisStateStore({ url, keyPrefix, clientFactory = createClient }) {
   const client = clientFactory({ url });
 
@@ -107,6 +136,45 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
         },
         async clearEntries() {
           await client.del(redisKey);
+        },
+      };
+    },
+    createWebAuthStore() {
+      const sessionPrefix = buildKey(keyPrefix, 'web-session');
+      const loginAttemptPrefix = buildKey(keyPrefix, 'web-login-attempt');
+
+      return {
+        async getSession(token) {
+          const raw = await client.get(`${sessionPrefix}:${token}`);
+          if (!raw) {
+            return null;
+          }
+
+          return parseWebSession(raw);
+        },
+        async createSession({ token, expiresAt, ttlMs }) {
+          await client.set(`${sessionPrefix}:${token}`, JSON.stringify({ expiresAt }), {
+            PX: ttlMs,
+          });
+        },
+        async deleteSession(token) {
+          await client.del(`${sessionPrefix}:${token}`);
+        },
+        async getLoginAttempt(key) {
+          const raw = await client.get(`${loginAttemptPrefix}:${key}`);
+          if (!raw) {
+            return null;
+          }
+
+          return parseWebLoginAttempt(raw);
+        },
+        async setLoginAttempt(key, entry, ttlMs) {
+          await client.set(`${loginAttemptPrefix}:${key}`, JSON.stringify(entry), {
+            PX: ttlMs,
+          });
+        },
+        async clearLoginAttempt(key) {
+          await client.del(`${loginAttemptPrefix}:${key}`);
         },
       };
     },

@@ -40,6 +40,49 @@ const stateBackend = config.redisUrl
       keyPrefix: config.redisKeyPrefix,
     })
   : null;
+const webAuthStateStore = stateBackend
+  ? stateBackend.createWebAuthStore()
+  : {
+      async getSession(token) {
+        for (const [storedToken, session] of webSessions.entries()) {
+          if (session.expiresAt <= Date.now()) {
+            webSessions.delete(storedToken);
+          }
+        }
+
+        const session = webSessions.get(token);
+        if (!session) return null;
+        if (session.expiresAt <= Date.now()) {
+          webSessions.delete(token);
+          return null;
+        }
+
+        return { ...session };
+      },
+      async createSession({ token, expiresAt }) {
+        webSessions.set(token, { expiresAt });
+      },
+      async deleteSession(token) {
+        webSessions.delete(token);
+      },
+      async getLoginAttempt(key) {
+        const now = Date.now();
+        for (const [storedKey, entry] of webLoginAttempts.entries()) {
+          if (entry.blockedUntil > now) continue;
+          const windowMs = config.webLoginWindowMinutes * 60 * 1000;
+          if (now - entry.windowStartedAt < windowMs) continue;
+          webLoginAttempts.delete(storedKey);
+        }
+
+        return webLoginAttempts.get(key) || null;
+      },
+      async setLoginAttempt(key, entry) {
+        webLoginAttempts.set(key, entry);
+      },
+      async clearLoginAttempt(key) {
+        webLoginAttempts.delete(key);
+      },
+    };
 const proxyStateFileStore = stateBackend ? stateBackend.createProxyApiKeyStore() : createProxyStateFileStore({ filePath: config.proxyStateFile });
 const recentLogFileStore = stateBackend ? stateBackend.createRecentLogStore() : createRecentLogFileStore({ filePath: config.recentLogFile });
 const initialRecentLogEntries = await recentLogFileStore.loadEntries();
@@ -257,27 +300,16 @@ function getWebLoginKey(req) {
   return forwardedFor || req.socket?.remoteAddress || 'unknown';
 }
 
-function cleanupExpiredWebSessions(now = Date.now()) {
-  for (const [token, session] of webSessions.entries()) {
-    if (session.expiresAt <= now) {
-      webSessions.delete(token);
-    }
-  }
+function getWebLoginStorageKey(req) {
+  return crypto.createHash('sha256').update(getWebLoginKey(req)).digest('hex');
 }
 
-function getWebSession(req) {
-  cleanupExpiredWebSessions();
-
+async function getWebSession(req) {
   const token = parseCookies(req)[WEB_SESSION_COOKIE_NAME];
   if (!token) return null;
 
-  const session = webSessions.get(token);
+  const session = await webAuthStateStore.getSession(token);
   if (!session) return null;
-
-  if (session.expiresAt <= Date.now()) {
-    webSessions.delete(token);
-    return null;
-  }
 
   return {
     token,
@@ -285,14 +317,16 @@ function getWebSession(req) {
   };
 }
 
-function createWebSession() {
-  cleanupExpiredWebSessions();
-
+async function createWebSession() {
   const maxAgeSeconds = config.webSessionTtlHours * 60 * 60;
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + maxAgeSeconds * 1000;
 
-  webSessions.set(token, { expiresAt });
+  await webAuthStateStore.createSession({
+    token,
+    expiresAt,
+    ttlMs: maxAgeSeconds * 1000,
+  });
 
   return {
     token,
@@ -300,56 +334,42 @@ function createWebSession() {
   };
 }
 
-function cleanupExpiredWebLoginAttempts(now = Date.now()) {
-  const windowMs = config.webLoginWindowMinutes * 60 * 1000;
-
-  for (const [key, entry] of webLoginAttempts.entries()) {
-    if (entry.blockedUntil > now) continue;
-    if (now - entry.windowStartedAt < windowMs) continue;
-    webLoginAttempts.delete(key);
-  }
-}
-
-function getActiveWebLoginAttempt(req, now = Date.now()) {
+async function getActiveWebLoginAttempt(req, now = Date.now()) {
   if (config.webLoginMaxAttempts <= 0) {
     return null;
   }
 
-  cleanupExpiredWebLoginAttempts(now);
-
-  const key = getWebLoginKey(req);
-  const entry = webLoginAttempts.get(key);
+  const key = getWebLoginStorageKey(req);
+  const entry = await webAuthStateStore.getLoginAttempt(key);
 
   if (!entry) return null;
   if (entry.blockedUntil > now) return { key, ...entry };
 
   const windowMs = config.webLoginWindowMinutes * 60 * 1000;
   if (now - entry.windowStartedAt >= windowMs) {
-    webLoginAttempts.delete(key);
+    await webAuthStateStore.clearLoginAttempt(key);
     return null;
   }
 
   return { key, ...entry };
 }
 
-function clearWebLoginAttempts(req) {
+async function clearWebLoginAttempts(req) {
   if (config.webLoginMaxAttempts <= 0) {
     return;
   }
 
-  webLoginAttempts.delete(getWebLoginKey(req));
+  await webAuthStateStore.clearLoginAttempt(getWebLoginStorageKey(req));
 }
 
-function registerFailedWebLogin(req, now = Date.now()) {
+async function registerFailedWebLogin(req, now = Date.now()) {
   if (config.webLoginMaxAttempts <= 0) {
     return null;
   }
 
-  cleanupExpiredWebLoginAttempts(now);
-
-  const key = getWebLoginKey(req);
+  const key = getWebLoginStorageKey(req);
   const windowMs = config.webLoginWindowMinutes * 60 * 1000;
-  const current = webLoginAttempts.get(key);
+  const current = await webAuthStateStore.getLoginAttempt(key);
   const expired = current && current.blockedUntil <= now && now - current.windowStartedAt >= windowMs;
   const entry = !current || expired ? { count: 0, windowStartedAt: now, blockedUntil: 0 } : current;
 
@@ -359,7 +379,9 @@ function registerFailedWebLogin(req, now = Date.now()) {
     entry.blockedUntil = now + windowMs;
   }
 
-  webLoginAttempts.set(key, entry);
+  const expiresAt = entry.blockedUntil > now ? entry.blockedUntil : entry.windowStartedAt + windowMs;
+  const ttlMs = Math.max(1_000, expiresAt - now);
+  await webAuthStateStore.setLoginAttempt(key, entry, ttlMs);
   return { key, ...entry };
 }
 
@@ -404,26 +426,47 @@ async function readFormBody(req, limitBytes = 16 * 1024) {
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
-function hasDocsAccess(req) {
+async function hasDocsAccess(req) {
   if (!isWebLoginEnabled()) {
     return true;
   }
 
-  return Boolean(getWebSession(req));
+  return Boolean(await getWebSession(req));
 }
 
-function ensureDocsAccess(req, res, { requireWebLogin = false } = {}) {
+async function ensureDocsAccess(req, res, { requireWebLogin = false } = {}) {
   if (requireWebLogin && !isWebLoginEnabled()) {
     jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
     return false;
   }
 
-  if (hasDocsAccess(req)) {
-    return true;
+  try {
+    if (await hasDocsAccess(req)) {
+      return true;
+    }
+  } catch (error) {
+    log('docs auth state failed', { error: error.message }, 'error');
+    jsonError(res, 503, 'Docs auth state is temporarily unavailable.');
+    return false;
   }
 
   jsonError(res, 401, 'Web docs login is required.');
   return false;
+}
+
+function renderDocsStateUnavailable(res, message) {
+  html(
+    res,
+    503,
+    renderLoginPage({
+      errorMessage: message,
+      loginPath: '/login',
+    }),
+    {
+      'cache-control': 'no-store',
+      vary: 'Cookie',
+    },
+  );
 }
 
 async function handleWebLogin(req, res) {
@@ -434,7 +477,7 @@ async function handleWebLogin(req, res) {
     return;
   }
 
-  const blockedAttempt = getActiveWebLoginAttempt(req);
+  const blockedAttempt = await getActiveWebLoginAttempt(req);
   if (blockedAttempt?.blockedUntil > Date.now()) {
     const waitSeconds = describeWebLoginBlockSeconds(blockedAttempt);
     log('docs login blocked', { client: getWebLoginKey(req), waitSeconds }, 'warn');
@@ -458,7 +501,7 @@ async function handleWebLogin(req, res) {
     const password = String(form.get('password') ?? '');
 
     if (!verifyWebPassword(password, config)) {
-      const failedAttempt = registerFailedWebLogin(req);
+      const failedAttempt = await registerFailedWebLogin(req);
       const waitSeconds = describeWebLoginBlockSeconds(failedAttempt);
       log('docs login failed', { client: getWebLoginKey(req), waitSeconds }, 'warn');
 
@@ -479,8 +522,8 @@ async function handleWebLogin(req, res) {
       return;
     }
 
-    clearWebLoginAttempts(req);
-    const session = createWebSession();
+    await clearWebLoginAttempts(req);
+    const session = await createWebSession();
     log('docs login succeeded', { client: getWebLoginKey(req) });
     redirect(res, '/docs', {
       'cache-control': 'no-store',
@@ -506,25 +549,30 @@ async function handleWebLogin(req, res) {
   }
 }
 
-function handleWebLogout(req, res) {
-  const session = getWebSession(req);
-  if (session) {
-    webSessions.delete(session.token);
-  }
-  log('docs logout', { hadSession: Boolean(session) });
+async function handleWebLogout(req, res) {
+  try {
+    const session = await getWebSession(req);
+    if (session) {
+      await webAuthStateStore.deleteSession(session.token);
+    }
+    log('docs logout', { hadSession: Boolean(session) });
 
-  redirect(res, '/docs', {
-    'cache-control': 'no-store',
-    'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, '', {
-      maxAgeSeconds: 0,
-      expires: new Date(0),
-      secure: requestIsSecure(req),
-    }),
-  });
+    redirect(res, '/docs', {
+      'cache-control': 'no-store',
+      'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, '', {
+        maxAgeSeconds: 0,
+        expires: new Date(0),
+        secure: requestIsSecure(req),
+      }),
+    });
+  } catch (error) {
+    log('docs logout failed', { error: error.message }, 'error');
+    renderDocsStateUnavailable(res, '로그아웃 중 세션 저장소를 읽지 못했습니다. 잠시 후 다시 시도하세요.');
+  }
 }
 
 async function handleClaudeAuthStatus(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
     return;
   }
 
@@ -541,18 +589,26 @@ async function handleClaudeAuthStatus(req, res) {
 }
 
 function handleClaudeAuthOperation(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+  if (!isWebLoginEnabled()) {
+    jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
     return;
   }
 
-  json(res, 200, {
-    ok: true,
-    operation: claudeAuthManager.getOperation(),
+  void getWebSession(req).then((session) => {
+    if (!session) {
+      jsonError(res, 401, 'Web docs login is required.');
+      return;
+    }
+
+    json(res, 200, {
+      ok: true,
+      operation: claudeAuthManager.getOperation(),
+    });
   });
 }
 
 async function handleClaudeAuthLogin(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
     return;
   }
 
@@ -582,41 +638,45 @@ async function handleClaudeAuthLogin(req, res) {
 }
 
 function handleClaudeAuthLogout(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
-    return;
-  }
+  void (async () => {
+    if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+      return;
+    }
 
-  try {
-    const operation = claudeAuthManager.startLogout();
-    json(res, 202, {
-      ok: true,
-      operation,
-    });
-    log('claude auth logout started');
-  } catch (error) {
-    log('claude auth logout failed', { error: error.message }, 'error');
-    jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude logout.', {
-      operation: error.operation || claudeAuthManager.getOperation(),
-    });
-  }
+    try {
+      const operation = claudeAuthManager.startLogout();
+      json(res, 202, {
+        ok: true,
+        operation,
+      });
+      log('claude auth logout started');
+    } catch (error) {
+      log('claude auth logout failed', { error: error.message }, 'error');
+      jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude logout.', {
+        operation: error.operation || claudeAuthManager.getOperation(),
+      });
+    }
+  })();
 }
 
 function handleProxyApiKeyStatus(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
-    return;
-  }
+  void (async () => {
+    if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+      return;
+    }
 
-  json(res, 200, {
-    ok: true,
-    settings: buildProxyApiKeySettings(),
-    apiKey: proxyApiKeyManager.getApiKey() || null,
-  }, {
-    'cache-control': 'no-store',
-  });
+    json(res, 200, {
+      ok: true,
+      settings: buildProxyApiKeySettings(),
+      apiKey: proxyApiKeyManager.getApiKey() || null,
+    }, {
+      'cache-control': 'no-store',
+    });
+  })();
 }
 
 async function handleProxyApiKeyUpdate(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
     return;
   }
 
@@ -647,7 +707,7 @@ async function handleProxyApiKeyUpdate(req, res) {
 }
 
 async function handleRecentLogs(req, res) {
-  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
     return;
   }
 
@@ -940,33 +1000,49 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'GET' && req.url === '/docs') {
-    if (isWebLoginEnabled() && !getWebSession(req)) {
-      html(res, 200, renderLoginPage({ loginPath: '/login' }), {
-        vary: 'Cookie',
-        'cache-control': 'no-store',
-      });
-      return;
-    }
+    void (async () => {
+      try {
+        const session = await getWebSession(req);
+        if (isWebLoginEnabled() && !session) {
+          html(res, 200, renderLoginPage({ loginPath: '/login' }), {
+            vary: 'Cookie',
+            'cache-control': 'no-store',
+          });
+          return;
+        }
 
-    html(res, 200, renderHomePage(config), {
-      vary: 'Cookie',
-      'cache-control': 'no-store',
-    });
+        html(res, 200, renderHomePage(config), {
+          vary: 'Cookie',
+          'cache-control': 'no-store',
+        });
+      } catch (error) {
+        log('docs page session check failed', { error: error.message }, 'error');
+        renderDocsStateUnavailable(res, '로그인 세션 저장소를 읽지 못했습니다. 잠시 후 다시 시도하세요.');
+      }
+    })();
     return;
   }
 
   if (req.method === 'GET' && req.url === '/login') {
-    if (!isWebLoginEnabled() || getWebSession(req)) {
-      redirect(res, '/docs', {
-        'cache-control': 'no-store',
-      });
-      return;
-    }
+    void (async () => {
+      try {
+        const session = await getWebSession(req);
+        if (!isWebLoginEnabled() || session) {
+          redirect(res, '/docs', {
+            'cache-control': 'no-store',
+          });
+          return;
+        }
 
-    html(res, 200, renderLoginPage({ loginPath: '/login' }), {
-      vary: 'Cookie',
-      'cache-control': 'no-store',
-    });
+        html(res, 200, renderLoginPage({ loginPath: '/login' }), {
+          vary: 'Cookie',
+          'cache-control': 'no-store',
+        });
+      } catch (error) {
+        log('login page session check failed', { error: error.message }, 'error');
+        renderDocsStateUnavailable(res, '로그인 세션 저장소를 읽지 못했습니다. 잠시 후 다시 시도하세요.');
+      }
+    })();
     return;
   }
 
@@ -976,7 +1052,7 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'POST' && req.url === '/logout') {
-    handleWebLogout(req, res);
+    void handleWebLogout(req, res);
     return;
   }
 

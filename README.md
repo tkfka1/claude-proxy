@@ -221,6 +221,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 최근 로그도 state 파일에 저장되므로 재시작 후 다시 볼 수 있음
 - 최근 로그가 파일에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
 - `REDIS_URL` 이 있으면 x-api-key state 와 최근 로그를 로컬 파일 대신 Redis에 저장
+- `REDIS_URL` 이 있으면 `/docs` 로그인 세션과 로그인 시도 제한도 Redis로 공유되어, 여러 pod 사이에서도 로그인 상태가 이어짐
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
   - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`

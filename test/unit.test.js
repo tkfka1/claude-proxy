@@ -446,5 +446,19 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
   await logStore.saveEntries([{ id: 1, at: '2026-04-24T00:00:00.000Z', level: 'info', event: 'demo', details: {} }]);
   assert.equal((await logStore.loadEntries()).length, 1);
 
+  const webAuthStore = store.createWebAuthStore();
+  await webAuthStore.createSession({
+    token: 'session-token',
+    expiresAt: Date.now() + 60_000,
+    ttlMs: 60_000,
+  });
+  assert.equal(Boolean(await webAuthStore.getSession('session-token')), true);
+  await webAuthStore.setLoginAttempt('client-key', {
+    count: 2,
+    windowStartedAt: 1,
+    blockedUntil: 2,
+  }, 60_000);
+  assert.equal((await webAuthStore.getLoginAttempt('client-key')).count, 2);
+
   await store.close();
 });
