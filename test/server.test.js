@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -558,6 +559,66 @@ test('POST /v1/messages enforces configurable concurrency and queue limits', asy
   const logBody = await logResponse.json();
   assert.ok(logBody.entries.some((entry) => entry.event === 'message concurrency queued'));
   assert.ok(logBody.entries.some((entry) => entry.event === 'message concurrency rejected'));
+});
+
+test('stream disconnect is logged as aborted and frees the execution slot', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'stream reply';
+  process.env.MOCK_CLAUDE_STREAM_DELAY_MS = '150';
+  messageConcurrencyManager.configure({
+    maxConcurrent: 1,
+    maxQueued: 1,
+  });
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const address = server.address();
+
+  await new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: address.address,
+        port: address.port,
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01',
+        },
+      },
+      (response) => {
+        response.once('data', () => {
+          response.destroy();
+          resolve();
+        });
+        response.once('error', reject);
+      },
+    );
+
+    request.once('error', reject);
+    request.end(
+      JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 256,
+        stream: true,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    );
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 250));
+
+  const cookie = await loginDocs(baseUrl);
+  const logResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const logBody = await logResponse.json();
+  assert.ok(
+    logBody.entries.some(
+      (entry) => entry.event === 'messages request aborted' && entry.details?.phase === 'stream',
+    ),
+  );
+  assert.equal(logBody.messageExecution.active, 0);
 });
 
 test('POST /v1/messages stays locked until x-api-key is configured when missing headers are disallowed', async () => {

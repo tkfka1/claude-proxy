@@ -767,6 +767,17 @@ async function handleMessages(req, res) {
           });
         },
         onDone(result) {
+          if (abortController.signal.aborted || req.destroyed || res.destroyed) {
+            releaseExecutionSlot?.();
+            releaseExecutionSlot = null;
+            log('messages request aborted', {
+              requestId,
+              phase: 'stream',
+              reason: 'client_disconnected',
+            }, 'warn');
+            return;
+          }
+
           writeSseEvent(res, 'content_block_stop', {
             type: 'content_block_stop',
             index: 0,
@@ -802,6 +813,15 @@ async function handleMessages(req, res) {
         onError(error) {
           releaseExecutionSlot?.();
           releaseExecutionSlot = null;
+          if (abortController.signal.aborted || req.destroyed || res.destroyed) {
+            log('messages request aborted', {
+              requestId,
+              phase: 'stream',
+              reason: 'client_disconnected',
+              error: error.message,
+            }, 'warn');
+            return;
+          }
           if (res.writableEnded) return;
           writeSseEvent(res, 'error', {
             type: 'error',
