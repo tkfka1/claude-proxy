@@ -21,6 +21,8 @@ process.env.PROXY_STATE_FILE = path.join(tempDir, 'proxy-runtime-state.json');
 process.env.RECENT_LOG_FILE = path.join(tempDir, 'recent-log.json');
 process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(tempDir, 'mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
+process.env.REDIS_URL = '';
+process.env.REDIS_KEY_PREFIX = 'claude-anthropic-proxy';
 
 const {
   config,

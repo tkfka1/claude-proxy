@@ -48,8 +48,8 @@ function parseRecentLogEntries(raw) {
     }));
 }
 
-export async function createRedisStateStore({ url, keyPrefix }) {
-  const client = createClient({ url });
+export async function createRedisStateStore({ url, keyPrefix, clientFactory = createClient }) {
+  const client = clientFactory({ url });
 
   client.on('error', (error) => {
     console.error(new Date().toISOString(), 'redis client error', {

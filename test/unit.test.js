@@ -28,36 +28,65 @@ import {
 } from '../src/proxy-state-file.js';
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
+import { createRedisStateStore } from '../src/redis-state-store.js';
 
 class FakeRedisSemaphoreClient {
   constructor() {
-    this.entries = new Map();
+    this.activeEntries = new Map();
+    this.queue = [];
+    this.queueHeartbeats = new Map();
+    this.sequence = 0;
   }
 
   prune(now) {
-    for (const [token, expiresAt] of this.entries.entries()) {
+    for (const [token, expiresAt] of this.activeEntries.entries()) {
       if (expiresAt <= now) {
-        this.entries.delete(token);
+        this.activeEntries.delete(token);
       }
     }
+    this.queue = this.queue.filter((entry) => {
+      const heartbeat = this.queueHeartbeats.get(entry.token) || 0;
+      if (heartbeat <= now) {
+        this.queueHeartbeats.delete(entry.token);
+        return false;
+      }
+      return true;
+    });
   }
 
   async sendCommand(args) {
     const script = args[1];
-    const argv = args.slice(4);
+    const numKeys = Number(args[2]);
+    const argv = args.slice(3 + numKeys);
 
-    if (script.includes('return {1, count + 1}')) {
+    if (script.includes('local seq = redis.call(\'INCR\'')) {
       const now = Number(argv[0]);
       const maxConcurrent = Number(argv[1]);
-      const expiresAt = Number(argv[2]);
-      const token = argv[3];
+      const maxQueued = Number(argv[2]);
+      const activeExpiresAt = Number(argv[3]);
+      const queueExpiresAt = Number(argv[4]);
+      const token = argv[5];
       this.prune(now);
-      const count = this.entries.size;
-      if (count < maxConcurrent) {
-        this.entries.set(token, expiresAt);
-        return [1, count + 1];
+      const queued = this.queue.find((entry) => entry.token === token);
+      if (!queued) {
+        if (this.queue.length >= maxQueued) {
+          return [2, this.queue.length, this.activeEntries.size, 0];
+        }
+        this.sequence += 1;
+        this.queue.push({ token, seq: this.sequence });
+        this.queue.sort((left, right) => left.seq - right.seq);
       }
-      return [0, count];
+      this.queueHeartbeats.set(token, queueExpiresAt);
+      const head = this.queue[0]?.token;
+      const activeCount = this.activeEntries.size;
+      if (head === token && activeCount < maxConcurrent) {
+        this.queue = this.queue.filter((entry) => entry.token !== token);
+        this.queueHeartbeats.delete(token);
+        this.activeEntries.set(token, activeExpiresAt);
+        return [1, this.queue.length, this.activeEntries.size, 0];
+      }
+      const rank = this.queue.findIndex((entry) => entry.token === token);
+      return [0, this.queue.length, this.activeEntries.size, rank + 1];
     }
 
     if (script.includes('ZSCORE')) {
@@ -65,27 +94,66 @@ class FakeRedisSemaphoreClient {
       const expiresAt = Number(argv[1]);
       const token = argv[2];
       this.prune(now);
-      if (this.entries.has(token)) {
-        this.entries.set(token, expiresAt);
+      if (this.activeEntries.has(token)) {
+        this.activeEntries.set(token, expiresAt);
       }
-      return this.entries.size;
+      return [this.activeEntries.size];
     }
 
     if (script.includes("redis.call('ZREM'")) {
       const token = argv[0];
       const now = Number(argv[1]);
-      this.entries.delete(token);
+      this.activeEntries.delete(token);
       this.prune(now);
-      return this.entries.size;
+      return [this.activeEntries.size];
     }
 
-    if (script.includes("return redis.call('ZCARD'")) {
+    if (script.includes("HDEL")) {
+      const token = argv[0];
+      this.queue = this.queue.filter((entry) => entry.token !== token);
+      this.queueHeartbeats.delete(token);
+      return [this.queue.length];
+    }
+
+    if (script.includes("return {redis.call('ZCARD'")) {
       const now = Number(argv[0]);
       this.prune(now);
-      return this.entries.size;
+      return [this.activeEntries.size, this.queue.length];
     }
 
     throw new Error(`Unsupported fake redis script: ${script}`);
+  }
+}
+
+class FakeRedisStateClient {
+  constructor() {
+    this.values = new Map();
+    this.isReady = true;
+    this.isOpen = true;
+  }
+
+  on() {
+    return this;
+  }
+
+  async connect() {
+    return this;
+  }
+
+  async get(key) {
+    return this.values.get(key) ?? null;
+  }
+
+  async set(key, value) {
+    this.values.set(key, value);
+  }
+
+  async del(key) {
+    this.values.delete(key);
+  }
+
+  async quit() {
+    this.isOpen = false;
   }
 }
 
@@ -333,4 +401,29 @@ test('redis message concurrency manager enforces a global semaphore with local q
   await new Promise((resolve) => setTimeout(resolve, 20));
   const finalStatus = await manager.getLiveStatus();
   assert.equal(finalStatus.globalActive, 0);
+});
+
+test('redis state store saves and loads proxy state plus recent logs', async () => {
+  const fakeClient = new FakeRedisStateClient();
+  const store = await createRedisStateStore({
+    url: 'redis://fake:6379/0',
+    keyPrefix: 'claude-proxy-test',
+    clientFactory: () => fakeClient,
+  });
+
+  const proxyStore = store.createProxyApiKeyStore();
+  await proxyStore.saveState({
+    proxyApiKey: 'redis-state-key',
+    updatedAt: '2026-04-24T00:00:00.000Z',
+  });
+  assert.deepEqual(await proxyStore.loadState(), {
+    proxyApiKey: 'redis-state-key',
+    updatedAt: '2026-04-24T00:00:00.000Z',
+  });
+
+  const logStore = store.createRecentLogStore();
+  await logStore.saveEntries([{ id: 1, at: '2026-04-24T00:00:00.000Z', level: 'info', event: 'demo', details: {} }]);
+  assert.equal((await logStore.loadEntries()).length, 1);
+
+  await store.close();
 });
