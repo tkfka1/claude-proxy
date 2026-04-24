@@ -236,7 +236,8 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 현재 상태는 `/docs` 의 최근 로그 패널 또는 `GET /logs/recent` 에서 확인 가능
 - 기본 파일 backend에서는 동시성 제한이 **현재 프로세스/Pod 기준**
 - `REDIS_URL` 이 있으면 실행 슬롯은 **Redis 기반 전역 semaphore** 로 바뀌고, 여러 pod 사이에서도 active 개수를 공유
-- 다만 대기 큐 길이(`MAX_QUEUED_MESSAGE_REQUESTS`)는 아직 **pod 로컬 기준**
+- Redis backend에서는 FIFO 대기열도 Redis에 올라가며, `/logs/recent` 에서 전역 active/global queued/local queued 상태를 같이 볼 수 있음
+- 다만 `MAX_QUEUED_MESSAGE_REQUESTS` 는 여전히 **pod당 local waiting cap** 으로도 같이 쓰므로, 한 pod가 너무 많은 대기 요청을 쌓는 것은 막음
 
 ### Claude CLI 웹 로그인
 

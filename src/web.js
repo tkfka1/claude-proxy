@@ -667,7 +667,7 @@ export function renderHomePage(config) {
           const concurrencyLabel = stats.enabled
             ? (
               (stats.backend === 'redis-global'
-                ? ('global active ' + stats.globalActive + '/' + stats.maxConcurrent + ' · local queued ' + stats.queued + '/' + stats.maxQueued)
+                ? ('global active ' + stats.globalActive + '/' + stats.maxConcurrent + ' · global queued ' + stats.globalQueued + ' · local queued ' + stats.queued + '/' + stats.maxQueued)
                 : ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued))
             )
             : 'unlimited';

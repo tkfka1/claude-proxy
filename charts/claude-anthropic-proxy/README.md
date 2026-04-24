@@ -96,7 +96,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ## x-api-key state PVC fallback 예시
 
 기본 `values-prod.yaml` 는 내부 Redis를 같이 띄워 상태를 보존합니다.
-이 기본 경로에서는 `/v1/messages` active concurrency도 Redis semaphore 기준으로 공유됩니다.
+이 기본 경로에서는 `/v1/messages` active concurrency도 Redis semaphore 기준으로 공유되고, 대기열도 Redis에 올라갑니다.
 Redis 대신 로컬 파일 + PVC fallback 모드가 필요할 때만 아래 예시를 씁니다.
 
 이 예시는 single replica 기준입니다.
