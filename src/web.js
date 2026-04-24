@@ -413,7 +413,7 @@ export function renderHomePage(config) {
           <h2>x-api-key 설정</h2>
           <p class="muted">
             문서 로그인 후 여기서 프록시가 검사할 <span class="inline-code">x-api-key</span> 값을 바꿀 수 있습니다.
-            값은 현재 서버 프로세스 메모리에 저장되고, 프로세스를 재시작하면 환경 변수 기본값으로 돌아갑니다.
+            값은 상태 파일에 저장되고, 서버를 재시작해도 다시 불러옵니다.
           </p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="proxy-api-key-summary"><strong>상태 확인 중...</strong></div>
@@ -588,7 +588,10 @@ export function renderHomePage(config) {
             ? '<strong>x-api-key: 설정됨</strong>'
             : '<strong>x-api-key: 아직 없음</strong>';
           proxyApiKeyDetail.textContent = proxyApiKeyConfigured
-            ? [settings.maskedApiKey, settings.updatedAt ? new Date(settings.updatedAt).toLocaleString() : '']
+            ? [
+                settings.maskedApiKey,
+                settings.updatedAt ? new Date(settings.updatedAt).toLocaleString() : '',
+              ]
                 .filter(Boolean)
                 .join(' · ')
             : proxyApiKeyHeaderRequired

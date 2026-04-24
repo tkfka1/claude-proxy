@@ -5,6 +5,8 @@ ENV NODE_ENV=production \
     PORT=8080
 
 RUN npm install -g @anthropic-ai/claude-code
+RUN mkdir -p /home/node/.local/state/claude-anthropic-proxy \
+  && chown -R node:node /home/node/.local
 
 WORKDIR /app
 

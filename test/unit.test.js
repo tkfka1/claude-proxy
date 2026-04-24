@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   buildClaudePrompt,
@@ -17,6 +20,10 @@ import {
   maskProxyApiKey,
   validateProxyApiKeyInput,
 } from '../src/proxy-api-key.js';
+import {
+  createProxyStateFileStore,
+  resolveProxyStateFile,
+} from '../src/proxy-state-file.js';
 
 test('buildClaudePrompt formats conversation history', () => {
   const prompt = buildClaudePrompt([
@@ -97,4 +104,104 @@ test('proxy api key helpers validate, mask, and update runtime state', () => {
 
   manager.resetApiKey('');
   assert.equal(manager.getStatus().configured, false);
+});
+
+test('proxy state file store saves and loads persisted x-api-key state', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-state-'));
+  const store = createProxyStateFileStore({
+    filePath: path.join(tempDir, 'runtime-state.json'),
+  });
+
+  assert.equal(store.loadState(), null);
+
+  store.saveState({
+    proxyApiKey: 'persisted-secret-key',
+    updatedAt: '2026-04-24T00:00:00.000Z',
+  });
+
+  assert.deepEqual(store.loadState(), {
+    proxyApiKey: 'persisted-secret-key',
+    updatedAt: '2026-04-24T00:00:00.000Z',
+    bootstrapFingerprint: null,
+  });
+
+  store.clearState();
+  assert.equal(store.loadState(), null);
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('proxy api key manager prefers persisted state over bootstrap env value', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-manager-'));
+  const store = createProxyStateFileStore({
+    filePath: path.join(tempDir, 'runtime-state.json'),
+  });
+
+  const firstManager = createProxyApiKeyManager({
+    initialApiKey: 'bootstrap-env-key',
+    storage: store,
+  });
+  firstManager.setApiKey('persisted-secret-key');
+
+  const secondManager = createProxyApiKeyManager({
+    initialApiKey: 'bootstrap-env-key',
+    storage: store,
+  });
+
+  assert.equal(secondManager.getApiKey(), 'persisted-secret-key');
+  assert.equal(secondManager.getStatus().configured, true);
+
+  const rotatedManager = createProxyApiKeyManager({
+    initialApiKey: 'emergency-env-rotation',
+    storage: store,
+  });
+
+  assert.equal(rotatedManager.getApiKey(), 'emergency-env-rotation');
+  assert.equal(store.loadState().proxyApiKey, 'emergency-env-rotation');
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('resolveProxyStateFile uses explicit env path when provided', () => {
+  const resolved = resolveProxyStateFile('./tmp/runtime-state.json');
+  assert.match(resolved, /tmp[\\/]+runtime-state\.json$/);
+});
+
+test('proxy api key manager ignores a corrupt persisted state file and keeps bootstrap key', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-'));
+  const filePath = path.join(tempDir, 'runtime-state.json');
+  fs.writeFileSync(filePath, '{"proxyApiKey": ', 'utf8');
+
+  const store = createProxyStateFileStore({ filePath });
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+
+  const manager = createProxyApiKeyManager({
+    initialApiKey: 'bootstrap-env-key',
+    storage: store,
+  });
+
+  console.warn = originalWarn;
+
+  assert.equal(manager.getApiKey(), 'bootstrap-env-key');
+  assert.match(warnings[0] || '', /Failed to load persisted proxy API key state/);
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('proxy api key manager refuses corrupt persisted state when no env fallback exists', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-hardfail-'));
+  const filePath = path.join(tempDir, 'runtime-state.json');
+  fs.writeFileSync(filePath, '{"proxyApiKey": ', 'utf8');
+
+  const store = createProxyStateFileStore({ filePath });
+  assert.throws(
+    () =>
+      createProxyApiKeyManager({
+        initialApiKey: '',
+        storage: store,
+      }),
+    /no PROXY_API_KEY fallback is configured/,
+  );
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });

@@ -20,6 +20,7 @@ import {
 } from './anthropic.js';
 import { createClaudeAuthManager } from './claude-auth.js';
 import { createProxyApiKeyManager } from './proxy-api-key.js';
+import { createProxyStateFileStore } from './proxy-state-file.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { verifyWebPassword } from './web-auth.js';
 import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
@@ -29,7 +30,12 @@ const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
-const proxyApiKeyManager = createProxyApiKeyManager({ initialApiKey: config.proxyApiKey });
+const proxyStateFileStore = createProxyStateFileStore({ filePath: config.proxyStateFile });
+const proxyApiKeyManager = createProxyApiKeyManager({
+  initialApiKey: config.proxyApiKey,
+  storage: proxyStateFileStore,
+});
+config.proxyApiKey = proxyApiKeyManager.getApiKey();
 
 function log(...args) {
   if (!config.enableRequestLogging) return;
@@ -528,6 +534,8 @@ function handleProxyApiKeyStatus(req, res) {
     ok: true,
     settings: buildProxyApiKeySettings(),
     apiKey: proxyApiKeyManager.getApiKey() || null,
+  }, {
+    'cache-control': 'no-store',
   });
 }
 
@@ -548,9 +556,11 @@ async function handleProxyApiKeyUpdate(req, res) {
       ok: true,
       settings: buildProxyApiKeySettings(),
       apiKey: next.apiKey,
+    }, {
+      'cache-control': 'no-store',
     });
   } catch (error) {
-    jsonError(res, 400, error.message || 'Failed to update x-api-key.');
+    jsonError(res, error.statusCode || 500, error.message || 'Failed to update x-api-key.');
   }
 }
 
@@ -895,4 +905,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   startServer();
 }
 
-export { config, proxyApiKeyManager, server, requestHandler, startServer };
+export { config, proxyApiKeyManager, proxyStateFileStore, server, requestHandler, startServer };

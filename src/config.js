@@ -1,5 +1,6 @@
 import 'dotenv/config';
 
+import { resolveProxyStateFile } from './proxy-state-file.js';
 import { validateWebPasswordSettings } from './web-auth.js';
 
 function parseJsonEnv(name, fallback) {
@@ -66,6 +67,7 @@ export function loadConfig() {
     claudeModelMap: modelMap,
     claudeExtraArgs: extraArgs.map(String),
     proxyApiKey: process.env.PROXY_API_KEY || '',
+    proxyStateFile: resolveProxyStateFile(),
     requireAnthropicVersion: parseBooleanEnv('REQUIRE_ANTHROPIC_VERSION', false),
     defaultAnthropicVersion: process.env.DEFAULT_ANTHROPIC_VERSION || '2023-06-01',
     allowMissingApiKeyHeader: parseBooleanEnv('ALLOW_MISSING_API_KEY_HEADER', true),

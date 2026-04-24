@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-test-'));
 process.env.CLAUDE_BIN = path.join(__dirname, 'fixtures', 'mock-claude.js');
 process.env.ENABLE_REQUEST_LOGGING = 'false';
 process.env.ALLOW_MISSING_API_KEY_HEADER = 'true';
@@ -14,7 +16,8 @@ process.env.WEB_PASSWORD_HASH = '';
 process.env.WEB_SESSION_TTL_HOURS = '12';
 process.env.WEB_LOGIN_MAX_ATTEMPTS = '2';
 process.env.WEB_LOGIN_WINDOW_MINUTES = '1';
-process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(__dirname, '.mock-claude-auth-state.json');
+process.env.PROXY_STATE_FILE = path.join(tempDir, 'proxy-runtime-state.json');
+process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(tempDir, 'mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 
 const { config, proxyApiKeyManager, server } = await import('../src/server.js');
@@ -80,6 +83,8 @@ test.after(async () => {
   }
 
   fs.rmSync(process.env.MOCK_CLAUDE_AUTH_STATE_FILE, { force: true });
+  fs.rmSync(process.env.PROXY_STATE_FILE, { force: true });
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 test.beforeEach(() => {
@@ -355,6 +360,9 @@ test('POST /proxy-api-key updates the runtime x-api-key after docs login', async
   assert.equal(statusBody.settings.headerRequired, true);
   assert.equal(statusBody.settings.maskedApiKey, 'runt…ey');
   assert.equal(statusBody.apiKey, 'runtime-secret-key');
+
+  const persistedState = JSON.parse(fs.readFileSync(config.proxyStateFile, 'utf8'));
+  assert.equal(persistedState.proxyApiKey, 'runtime-secret-key');
 });
 
 test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts requiring it', async () => {

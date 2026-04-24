@@ -16,3 +16,7 @@ services:
       PORT: 8080
     volumes:
       - ${HOME}/.claude:/home/node/.claude:ro
+      - claude-proxy-state:/home/node/.local/state/claude-anthropic-proxy
+
+volumes:
+  claude-proxy-state:
