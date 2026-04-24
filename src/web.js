@@ -665,7 +665,11 @@ export function renderHomePage(config) {
         function renderRecentLogs(payload) {
           const stats = payload.messageExecution || {};
           const concurrencyLabel = stats.enabled
-            ? ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued)
+            ? (
+              (stats.backend === 'redis-global'
+                ? ('global active ' + stats.globalActive + '/' + stats.maxConcurrent + ' · local queued ' + stats.queued + '/' + stats.maxQueued)
+                : ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued))
+            )
             : 'unlimited';
           recentLogSummary.innerHTML = '<strong>동시성</strong> ' + concurrencyLabel;
           const entries = Array.isArray(payload.entries) ? payload.entries : [];

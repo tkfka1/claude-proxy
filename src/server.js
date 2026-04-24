@@ -22,6 +22,7 @@ import { createClaudeAuthManager } from './claude-auth.js';
 import { createMessageConcurrencyManager } from './message-concurrency.js';
 import { createProxyApiKeyManager } from './proxy-api-key.js';
 import { createProxyStateFileStore, createRecentLogFileStore } from './proxy-state-file.js';
+import { createRedisMessageConcurrencyManager } from './redis-message-concurrency.js';
 import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
@@ -60,20 +61,38 @@ const proxyApiKeyManager = createProxyApiKeyManager({
   loadedState: initialProxyApiKeyState,
   storage: proxyStateFileStore,
 });
-const messageConcurrencyManager = createMessageConcurrencyManager({
-  maxConcurrent: config.maxConcurrentMessageRequests,
-  maxQueued: config.maxQueuedMessageRequests,
-  onEvent(type, payload) {
-    const levels = {
-      queued: 'info',
-      acquired: 'info',
-      released: 'info',
-      rejected: 'warn',
-      aborted: 'warn',
-    };
-    recentLogStore.add(levels[type] || 'info', `message concurrency ${type}`, payload);
-  },
-});
+const messageConcurrencyManager = stateBackend
+  ? createRedisMessageConcurrencyManager({
+      client: stateBackend.client,
+      keyPrefix: config.redisKeyPrefix,
+      maxConcurrent: config.maxConcurrentMessageRequests,
+      maxQueued: config.maxQueuedMessageRequests,
+      onEvent(type, payload) {
+        const levels = {
+          queued: 'info',
+          acquired: 'info',
+          released: 'info',
+          rejected: 'warn',
+          aborted: 'warn',
+          redis_error: 'error',
+        };
+        recentLogStore.add(levels[type] || 'info', `message concurrency ${type}`, payload);
+      },
+    })
+  : createMessageConcurrencyManager({
+      maxConcurrent: config.maxConcurrentMessageRequests,
+      maxQueued: config.maxQueuedMessageRequests,
+      onEvent(type, payload) {
+        const levels = {
+          queued: 'info',
+          acquired: 'info',
+          released: 'info',
+          rejected: 'warn',
+          aborted: 'warn',
+        };
+        recentLogStore.add(levels[type] || 'info', `message concurrency ${type}`, payload);
+      },
+    });
 config.proxyApiKey = proxyApiKeyManager.getApiKey();
 config.stateBackend = stateBackend ? 'redis' : 'file';
 
@@ -625,17 +644,18 @@ async function handleProxyApiKeyUpdate(req, res) {
   }
 }
 
-function handleRecentLogs(req, res) {
+async function handleRecentLogs(req, res) {
   if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
     return;
   }
 
+  const messageExecution = await messageConcurrencyManager.getLiveStatus();
   json(res, 200, {
     ok: true,
     entries: recentLogStore.list(),
     logStore: recentLogStore.getStatus(),
     stateBackend: config.stateBackend,
-    messageExecution: messageConcurrencyManager.getStatus(),
+    messageExecution,
   }, {
     'cache-control': 'no-store',
   });
@@ -994,7 +1014,7 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'GET' && req.url === '/logs/recent') {
-    handleRecentLogs(req, res);
+    void handleRecentLogs(req, res);
     return;
   }
 

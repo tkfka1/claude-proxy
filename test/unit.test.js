@@ -26,7 +26,68 @@ import {
   resolveProxyStateFile,
   resolveRecentLogFile,
 } from '../src/proxy-state-file.js';
+import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
+
+class FakeRedisSemaphoreClient {
+  constructor() {
+    this.entries = new Map();
+  }
+
+  prune(now) {
+    for (const [token, expiresAt] of this.entries.entries()) {
+      if (expiresAt <= now) {
+        this.entries.delete(token);
+      }
+    }
+  }
+
+  async sendCommand(args) {
+    const script = args[1];
+    const argv = args.slice(4);
+
+    if (script.includes('return {1, count + 1}')) {
+      const now = Number(argv[0]);
+      const maxConcurrent = Number(argv[1]);
+      const expiresAt = Number(argv[2]);
+      const token = argv[3];
+      this.prune(now);
+      const count = this.entries.size;
+      if (count < maxConcurrent) {
+        this.entries.set(token, expiresAt);
+        return [1, count + 1];
+      }
+      return [0, count];
+    }
+
+    if (script.includes('ZSCORE')) {
+      const now = Number(argv[0]);
+      const expiresAt = Number(argv[1]);
+      const token = argv[2];
+      this.prune(now);
+      if (this.entries.has(token)) {
+        this.entries.set(token, expiresAt);
+      }
+      return this.entries.size;
+    }
+
+    if (script.includes("redis.call('ZREM'")) {
+      const token = argv[0];
+      const now = Number(argv[1]);
+      this.entries.delete(token);
+      this.prune(now);
+      return this.entries.size;
+    }
+
+    if (script.includes("return redis.call('ZCARD'")) {
+      const now = Number(argv[0]);
+      this.prune(now);
+      return this.entries.size;
+    }
+
+    throw new Error(`Unsupported fake redis script: ${script}`);
+  }
+}
 
 test('buildClaudePrompt formats conversation history', () => {
   const prompt = buildClaudePrompt([
@@ -244,4 +305,32 @@ test('recent log store redacts sensitive fields before persistence', async () =>
   });
 
   fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('redis message concurrency manager enforces a global semaphore with local queueing', async () => {
+  const client = new FakeRedisSemaphoreClient();
+  const manager = createRedisMessageConcurrencyManager({
+    client,
+    keyPrefix: 'claude-proxy-test',
+    maxConcurrent: 1,
+    maxQueued: 1,
+    pollIntervalMs: 10,
+    leaseMs: 100,
+  });
+
+  const first = await manager.acquire({ requestId: 'req_1' });
+  const secondPromise = manager.acquire({ requestId: 'req_2' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const thirdPromise = manager.acquire({ requestId: 'req_3' });
+
+  await assert.rejects(thirdPromise, /Too many concurrent/);
+  first.release();
+  const second = await secondPromise;
+  const liveStatus = await manager.getLiveStatus();
+  assert.equal(liveStatus.backend, 'redis-global');
+  assert.equal(liveStatus.globalActive, 1);
+  second.release();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const finalStatus = await manager.getLiveStatus();
+  assert.equal(finalStatus.globalActive, 0);
 });

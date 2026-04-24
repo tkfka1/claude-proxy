@@ -25,6 +25,7 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
 
   function getStatus() {
     return {
+      backend: 'local',
       enabled: currentMaxConcurrent > 0,
       maxConcurrent: currentMaxConcurrent,
       maxQueued: currentMaxQueued,
@@ -156,6 +157,9 @@ export function createMessageConcurrencyManager({ maxConcurrent = 4, maxQueued =
       dispatchNext();
     },
     getStatus,
+    async getLiveStatus() {
+      return getStatus();
+    },
     clearQueue() {
       for (const entry of queue) {
         abortQueueEntry(entry);
