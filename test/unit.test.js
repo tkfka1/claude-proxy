@@ -122,7 +122,6 @@ test('proxy state file store saves and loads persisted x-api-key state', () => {
   assert.deepEqual(store.loadState(), {
     proxyApiKey: 'persisted-secret-key',
     updatedAt: '2026-04-24T00:00:00.000Z',
-    bootstrapFingerprint: null,
   });
 
   store.clearState();
@@ -130,7 +129,7 @@ test('proxy state file store saves and loads persisted x-api-key state', () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('proxy api key manager prefers persisted state over bootstrap env value', () => {
+test('proxy api key manager bootstraps from env once and then keeps persisted state', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-manager-'));
   const store = createProxyStateFileStore({
     filePath: path.join(tempDir, 'runtime-state.json'),
@@ -140,6 +139,9 @@ test('proxy api key manager prefers persisted state over bootstrap env value', (
     initialApiKey: 'bootstrap-env-key',
     storage: store,
   });
+  assert.equal(firstManager.getApiKey(), 'bootstrap-env-key');
+  assert.equal(store.loadState().proxyApiKey, 'bootstrap-env-key');
+
   firstManager.setApiKey('persisted-secret-key');
 
   const secondManager = createProxyApiKeyManager({
@@ -155,8 +157,8 @@ test('proxy api key manager prefers persisted state over bootstrap env value', (
     storage: store,
   });
 
-  assert.equal(rotatedManager.getApiKey(), 'emergency-env-rotation');
-  assert.equal(store.loadState().proxyApiKey, 'emergency-env-rotation');
+  assert.equal(rotatedManager.getApiKey(), 'persisted-secret-key');
+  assert.equal(store.loadState().proxyApiKey, 'persisted-secret-key');
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
@@ -166,30 +168,8 @@ test('resolveProxyStateFile uses explicit env path when provided', () => {
   assert.match(resolved, /tmp[\\/]+runtime-state\.json$/);
 });
 
-test('proxy api key manager ignores a corrupt persisted state file and keeps bootstrap key', () => {
+test('proxy api key manager refuses a corrupt persisted state file even when env bootstrap exists', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-'));
-  const filePath = path.join(tempDir, 'runtime-state.json');
-  fs.writeFileSync(filePath, '{"proxyApiKey": ', 'utf8');
-
-  const store = createProxyStateFileStore({ filePath });
-  const warnings = [];
-  const originalWarn = console.warn;
-  console.warn = (message) => warnings.push(String(message));
-
-  const manager = createProxyApiKeyManager({
-    initialApiKey: 'bootstrap-env-key',
-    storage: store,
-  });
-
-  console.warn = originalWarn;
-
-  assert.equal(manager.getApiKey(), 'bootstrap-env-key');
-  assert.match(warnings[0] || '', /Failed to load persisted proxy API key state/);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-test('proxy api key manager refuses corrupt persisted state when no env fallback exists', () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-hardfail-'));
   const filePath = path.join(tempDir, 'runtime-state.json');
   fs.writeFileSync(filePath, '{"proxyApiKey": ', 'utf8');
 
@@ -197,10 +177,10 @@ test('proxy api key manager refuses corrupt persisted state when no env fallback
   assert.throws(
     () =>
       createProxyApiKeyManager({
-        initialApiKey: '',
+        initialApiKey: 'bootstrap-env-key',
         storage: store,
       }),
-    /no PROXY_API_KEY fallback is configured/,
+    /Failed to load persisted proxy API key state/,
   );
 
   fs.rmSync(tempDir, { recursive: true, force: true });

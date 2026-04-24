@@ -8,15 +8,6 @@ function createProxyApiKeyError(message, statusCode = 500) {
   return error;
 }
 
-function fingerprintApiKey(apiKey) {
-  const value = String(apiKey || '').trim();
-  if (!value) {
-    return null;
-  }
-
-  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
 export function maskProxyApiKey(apiKey) {
   const value = String(apiKey || '');
   if (!value) {
@@ -50,7 +41,6 @@ export function generateProxyApiKey() {
 
 export function createProxyApiKeyManager({ initialApiKey = '', storage = null } = {}) {
   const bootstrapApiKey = String(initialApiKey || '').trim();
-  const bootstrapFingerprint = fingerprintApiKey(bootstrapApiKey);
   let currentApiKey = bootstrapApiKey;
   let updatedAt = currentApiKey ? new Date().toISOString() : null;
 
@@ -58,26 +48,16 @@ export function createProxyApiKeyManager({ initialApiKey = '', storage = null } 
     try {
       const persistedState = storage.loadState();
       if (persistedState?.proxyApiKey) {
-        if (bootstrapFingerprint && persistedState.bootstrapFingerprint !== bootstrapFingerprint) {
-          currentApiKey = bootstrapApiKey;
-          updatedAt = new Date().toISOString();
-          storage.saveState({
-            proxyApiKey: currentApiKey,
-            updatedAt,
-            bootstrapFingerprint,
-          });
-        } else {
-          currentApiKey = persistedState.proxyApiKey;
-          updatedAt = persistedState.updatedAt || updatedAt || new Date().toISOString();
-        }
+        currentApiKey = persistedState.proxyApiKey;
+        updatedAt = persistedState.updatedAt || updatedAt || new Date().toISOString();
+      } else if (bootstrapApiKey) {
+        storage.saveState({
+          proxyApiKey: bootstrapApiKey,
+          updatedAt,
+        });
       }
     } catch (error) {
-      if (!bootstrapApiKey) {
-        throw createProxyApiKeyError(
-          `Failed to load persisted proxy API key state and no PROXY_API_KEY fallback is configured: ${error.message}`,
-        );
-      }
-      console.warn(`Failed to load persisted proxy API key state: ${error.message}`);
+      throw createProxyApiKeyError(`Failed to load persisted proxy API key state: ${error.message}`);
     }
   }
 
@@ -94,7 +74,6 @@ export function createProxyApiKeyManager({ initialApiKey = '', storage = null } 
     storage.saveState({
       proxyApiKey: nextApiKey,
       updatedAt: nextUpdatedAt,
-      bootstrapFingerprint,
     });
   }
 

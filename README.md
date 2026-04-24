@@ -207,7 +207,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 저장한 값은 현재 서버 프로세스 메모리에 반영되고, 즉시 `/v1/messages` 의 `x-api-key` 검증에 사용됨
 - `리셋` 버튼은 새 랜덤 x-api-key 를 다시 발급하고 이전 키를 즉시 무효화
 - 상태 파일에 저장되므로 서버를 재시작해도 다시 불러옴
-- 운영자가 `PROXY_API_KEY` 환경 변수를 새 값으로 바꾸고 재시작하면, 그 값이 저장된 UI 키보다 우선함
+- `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, 상태 파일이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
@@ -239,7 +239,7 @@ CLAUDE_EXTRA_ARGS_JSON=["--verbose"]
 
 ### 프록시 인증 설정
 
-- `PROXY_API_KEY`: 프록시 자체 API 키 bootstrap 값. 비워 두고 `/docs` 에서 나중에 설정해도 됨
+- `PROXY_API_KEY`: 프록시 자체 API 키 초기 bootstrap 값. 첫 저장 전 기본값으로만 사용되고, 이후에는 저장된 state 값이 계속 사용됨
 - `PROXY_STATE_FILE`: `/docs` 에서 바꾼 x-api-key 를 영속 저장할 파일 경로. 비우면 기본 state 디렉터리 사용
 - `ALLOW_MISSING_API_KEY_HEADER`: `x-api-key` 없는 요청 허용 여부
 - `REQUIRE_ANTHROPIC_VERSION`: `anthropic-version` 헤더 필수 여부

@@ -30,7 +30,6 @@ function normalizePersistedState(payload) {
 
   const proxyApiKey = String(payload.proxyApiKey || '').trim();
   const updatedAt = payload.updatedAt == null ? null : String(payload.updatedAt).trim();
-  const bootstrapFingerprint = payload.bootstrapFingerprint == null ? null : String(payload.bootstrapFingerprint).trim();
 
   if (!proxyApiKey) {
     return null;
@@ -39,7 +38,6 @@ function normalizePersistedState(payload) {
   return {
     proxyApiKey,
     updatedAt: updatedAt || null,
-    bootstrapFingerprint: bootstrapFingerprint || null,
   };
 }
 
@@ -64,11 +62,11 @@ export function createProxyStateFileStore({ filePath }) {
       const parsed = JSON.parse(raw);
       return normalizePersistedState(parsed);
     },
-    saveState({ proxyApiKey, updatedAt, bootstrapFingerprint = null }) {
+    saveState({ proxyApiKey, updatedAt }) {
       ensureParentDirectory();
 
       const tempPath = `${resolvedPath}.${process.pid}.${Date.now()}.tmp`;
-      const payload = `${JSON.stringify({ proxyApiKey, updatedAt, bootstrapFingerprint }, null, 2)}\n`;
+      const payload = `${JSON.stringify({ proxyApiKey, updatedAt }, null, 2)}\n`;
       fs.writeFileSync(tempPath, payload, {
         mode: 0o600,
       });
