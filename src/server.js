@@ -19,8 +19,10 @@ import {
   truncateByStopSequences,
 } from './anthropic.js';
 import { createClaudeAuthManager } from './claude-auth.js';
+import { createMessageConcurrencyManager } from './message-concurrency.js';
 import { createProxyApiKeyManager } from './proxy-api-key.js';
 import { createProxyStateFileStore } from './proxy-state-file.js';
+import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { verifyWebPassword } from './web-auth.js';
 import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
@@ -29,17 +31,33 @@ const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
+const recentLogStore = createRecentLogStore({ limit: config.recentLogLimit });
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
 const proxyStateFileStore = createProxyStateFileStore({ filePath: config.proxyStateFile });
 const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
   storage: proxyStateFileStore,
 });
+const messageConcurrencyManager = createMessageConcurrencyManager({
+  maxConcurrent: config.maxConcurrentMessageRequests,
+  maxQueued: config.maxQueuedMessageRequests,
+  onEvent(type, payload) {
+    const levels = {
+      queued: 'info',
+      acquired: 'info',
+      released: 'info',
+      rejected: 'warn',
+      aborted: 'warn',
+    };
+    recentLogStore.add(levels[type] || 'info', `message concurrency ${type}`, payload);
+  },
+});
 config.proxyApiKey = proxyApiKeyManager.getApiKey();
 
-function log(...args) {
+function log(event, details = {}, level = 'info') {
+  recentLogStore.add(level, event, details);
   if (!config.enableRequestLogging) return;
-  console.log(new Date().toISOString(), ...args);
+  console.log(new Date().toISOString(), event, details);
 }
 
 function isWebLoginEnabled() {
@@ -60,6 +78,8 @@ function buildServiceMetadata() {
     ...serviceMetadata,
     web_login_enabled: isWebLoginEnabled(),
     proxy_api_key_configured: buildProxyApiKeySettings().configured,
+    logs_path: '/logs/recent',
+    message_execution: messageConcurrencyManager.getStatus(),
     claude_auth_paths: {
       status: '/claude-auth/status',
       operation: '/claude-auth/operation',
@@ -371,6 +391,7 @@ async function handleWebLogin(req, res) {
   const blockedAttempt = getActiveWebLoginAttempt(req);
   if (blockedAttempt?.blockedUntil > Date.now()) {
     const waitSeconds = describeWebLoginBlockSeconds(blockedAttempt);
+    log('docs login blocked', { client: getWebLoginKey(req), waitSeconds }, 'warn');
     html(
       res,
       429,
@@ -393,6 +414,7 @@ async function handleWebLogin(req, res) {
     if (!verifyWebPassword(password, config)) {
       const failedAttempt = registerFailedWebLogin(req);
       const waitSeconds = describeWebLoginBlockSeconds(failedAttempt);
+      log('docs login failed', { client: getWebLoginKey(req), waitSeconds }, 'warn');
 
       html(
         res,
@@ -413,6 +435,7 @@ async function handleWebLogin(req, res) {
 
     clearWebLoginAttempts(req);
     const session = createWebSession();
+    log('docs login succeeded', { client: getWebLoginKey(req) });
     redirect(res, '/docs', {
       'cache-control': 'no-store',
       'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, session.token, {
@@ -421,6 +444,7 @@ async function handleWebLogin(req, res) {
       }),
     });
   } catch (error) {
+    log('docs login error', { client: getWebLoginKey(req), error: error.message }, 'error');
     html(
       res,
       400,
@@ -441,6 +465,7 @@ function handleWebLogout(req, res) {
   if (session) {
     webSessions.delete(session.token);
   }
+  log('docs logout', { hadSession: Boolean(session) });
 
   redirect(res, '/docs', {
     'cache-control': 'no-store',
@@ -464,6 +489,7 @@ async function handleClaudeAuthStatus(req, res) {
       status,
     });
   } catch (error) {
+    log('claude auth status failed', { error: error.message }, 'error');
     jsonError(res, 500, error.message || 'Failed to read Claude auth status.');
   }
 }
@@ -500,7 +526,9 @@ async function handleClaudeAuthLogin(req, res) {
       ok: true,
       operation,
     });
+    log('claude auth login started', { provider, email: email || null, sso });
   } catch (error) {
+    log('claude auth login failed', { error: error.message }, 'error');
     jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude login.', {
       operation: error.operation || claudeAuthManager.getOperation(),
     });
@@ -518,7 +546,9 @@ function handleClaudeAuthLogout(req, res) {
       ok: true,
       operation,
     });
+    log('claude auth logout started');
   } catch (error) {
+    log('claude auth logout failed', { error: error.message }, 'error');
     jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude logout.', {
       operation: error.operation || claudeAuthManager.getOperation(),
     });
@@ -559,9 +589,29 @@ async function handleProxyApiKeyUpdate(req, res) {
     }, {
       'cache-control': 'no-store',
     });
+    log('proxy api key updated', {
+      configured: true,
+      updatedAt: next.updatedAt,
+      reset: Boolean(body?.reset || body?.generate),
+    });
   } catch (error) {
+    log('proxy api key update failed', { error: error.message }, 'error');
     jsonError(res, error.statusCode || 500, error.message || 'Failed to update x-api-key.');
   }
+}
+
+function handleRecentLogs(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    entries: recentLogStore.list(),
+    messageExecution: messageConcurrencyManager.getStatus(),
+  }, {
+    'cache-control': 'no-store',
+  });
 }
 
 function applyProxyAuth(req, requestId) {
@@ -626,6 +676,17 @@ function sendModels(res) {
 
 async function handleMessages(req, res) {
   const requestId = createRequestId();
+  const abortController = new AbortController();
+  let releaseExecutionSlot = null;
+
+  req.on('aborted', () => {
+    abortController.abort();
+  });
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
 
   try {
     applyProxyAuth(req, requestId);
@@ -637,18 +698,20 @@ async function handleMessages(req, res) {
     const mappedModel = resolveCliModel(body.model, config);
     const stopSequences = body.stop_sequences || [];
     const responseMessageId = createMessageId();
-    const abortController = new AbortController();
-
-    req.on('aborted', () => {
-      abortController.abort();
-    });
-    res.on('close', () => {
-      if (!res.writableEnded) {
-        abortController.abort();
-      }
-    });
 
     log('messages request', { requestId, model: body.model, mappedModel, stream: Boolean(body.stream) });
+    const slot = await messageConcurrencyManager.acquire({
+      requestId,
+      signal: abortController.signal,
+    });
+    releaseExecutionSlot = slot.release;
+    log('messages execution started', {
+      requestId,
+      model: body.model,
+      stream: Boolean(body.stream),
+      waited_ms: slot.waitedMs,
+      ...messageConcurrencyManager.getStatus(),
+    });
 
     if (body.stream) {
       res.writeHead(200, sseHeaders(requestId));
@@ -728,6 +791,8 @@ async function handleMessages(req, res) {
           });
 
           res.end();
+          releaseExecutionSlot?.();
+          releaseExecutionSlot = null;
           log('messages stream completed', {
             requestId,
             elapsed_ms: Date.now() - startedAt,
@@ -735,6 +800,8 @@ async function handleMessages(req, res) {
           });
         },
         onError(error) {
+          releaseExecutionSlot?.();
+          releaseExecutionSlot = null;
           if (res.writableEnded) return;
           writeSseEvent(res, 'error', {
             type: 'error',
@@ -773,6 +840,8 @@ async function handleMessages(req, res) {
     json(res, 200, responseBody, {
       'request-id': requestId,
     });
+    releaseExecutionSlot?.();
+    releaseExecutionSlot = null;
 
     log('messages request completed', {
       requestId,
@@ -781,8 +850,14 @@ async function handleMessages(req, res) {
       output_tokens: cliResult.usage.output_tokens,
     });
   } catch (error) {
+    releaseExecutionSlot?.();
+    releaseExecutionSlot = null;
+    if (!(error instanceof ProxyError) && (abortController.signal.aborted || req.destroyed || res.destroyed)) {
+      log('messages request aborted', { requestId, error: error.message }, 'warn');
+      return;
+    }
     sendProxyError(res, error, requestId);
-    log('messages request failed', { requestId, error: error.message });
+    log('messages request failed', { requestId, error: error.message }, 'error');
   }
 }
 
@@ -880,6 +955,11 @@ function requestHandler(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/logs/recent') {
+    handleRecentLogs(req, res);
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     json(res, 200, {
       ok: true,
@@ -904,6 +984,11 @@ function requestHandler(req, res) {
 const server = http.createServer(requestHandler);
 
 function startServer() {
+  log('server started', {
+    host: config.host,
+    port: config.port,
+    messageExecution: messageConcurrencyManager.getStatus(),
+  });
   server.listen(config.port, config.host, () => {
     console.log(`claude-anthropic-proxy listening on http://${config.host}:${config.port}`);
   });
@@ -913,4 +998,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   startServer();
 }
 
-export { config, proxyApiKeyManager, proxyStateFileStore, server, requestHandler, startServer };
+export {
+  config,
+  messageConcurrencyManager,
+  proxyApiKeyManager,
+  proxyStateFileStore,
+  recentLogStore,
+  server,
+  requestHandler,
+  startServer,
+};

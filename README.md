@@ -24,6 +24,7 @@
 - `GET /claude-auth/operation` Claude CLI 로그인/로그아웃 작업 상태 조회 (문서 로그인 필요)
 - `POST /claude-auth/login` 웹에서 Claude CLI 로그인 시작 (문서 로그인 필요)
 - `POST /claude-auth/logout` 웹에서 Claude CLI 로그아웃 시작 (문서 로그인 필요)
+- `GET /logs/recent` 최근 프록시 로그 + 동시성 상태 조회 (문서 로그인 필요)
 - Anthropic 스타일 JSON 응답
 - `stream: true` 요청에 대한 SSE 응답
 - `system`, `messages`, `stop_sequences` 처리
@@ -165,7 +166,10 @@ curl -N http://localhost:8080/v1/messages \
 - `HOST`: 바인드 주소 (기본값 `0.0.0.0`)
 - `PORT`: 포트 (기본값 `8080`)
 - `REQUEST_BODY_LIMIT_BYTES`: 요청 바디 최대 크기
-- `ENABLE_REQUEST_LOGGING`: 요청 로그 출력 여부
+- `ENABLE_REQUEST_LOGGING`: stdout 요청 로그 출력 여부
+- `MAX_CONCURRENT_MESSAGE_REQUESTS`: 동시에 실행할 `/v1/messages` 개수(기본값 `4`, `0`이면 무제한)
+- `MAX_QUEUED_MESSAGE_REQUESTS`: 실행 슬롯을 기다릴 큐 길이(기본값 `16`)
+- `RECENT_LOG_LIMIT`: `/docs` 와 `/logs/recent` 에서 유지할 최근 로그 개수(기본값 `200`)
 
 ### 웹 문서 로그인 설정
 
@@ -209,10 +213,18 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 상태 파일에 저장되므로 서버를 재시작해도 다시 불러옴
 - `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, 상태 파일이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
+- `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
   - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`
 - 컨테이너 환경에서는 이 경로에 볼륨을 붙여야 재시작 후에도 유지됨
+
+### 메시지 동시성 / 큐
+
+- `/v1/messages` 는 설정한 동시성 제한 안에서만 `claude` child process 를 실행
+- 슬롯이 꽉 차면 큐에서 기다리고, 큐까지 다 차면 `429 rate_limit_error` 반환
+- 스트리밍 요청도 동일한 슬롯을 점유하므로 오래 걸리는 응답이 많으면 큐 대기가 늘어날 수 있음
+- 현재 상태는 `/docs` 의 최근 로그 패널 또는 `GET /logs/recent` 에서 확인 가능
 
 ### Claude CLI 웹 로그인
 

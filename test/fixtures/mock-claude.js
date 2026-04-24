@@ -7,6 +7,7 @@ const outputFormat = readArgValue('--output-format') || 'text';
 const model = readArgValue('--model') || 'sonnet';
 const stdin = await readStdin();
 const resultText = process.env.MOCK_CLAUDE_RESULT || 'mock completion';
+const delayMs = Number.parseInt(process.env.MOCK_CLAUDE_DELAY_MS || '0', 10) || 0;
 const usage = {
   input_tokens: 12,
   output_tokens: 7,
@@ -127,6 +128,10 @@ if (process.env.MOCK_CLAUDE_ERROR === 'auth') {
     usage,
   });
   process.exit(1);
+}
+
+if (delayMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 if (outputFormat === 'stream-json') {

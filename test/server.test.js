@@ -20,7 +20,13 @@ process.env.PROXY_STATE_FILE = path.join(tempDir, 'proxy-runtime-state.json');
 process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(tempDir, 'mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 
-const { config, proxyApiKeyManager, server } = await import('../src/server.js');
+const {
+  config,
+  messageConcurrencyManager,
+  proxyApiKeyManager,
+  recentLogStore,
+  server,
+} = await import('../src/server.js');
 
 function resetMockClaudeAuthState(state = {}) {
   fs.writeFileSync(
@@ -90,9 +96,16 @@ test.after(async () => {
 test.beforeEach(() => {
   resetMockClaudeAuthState();
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
+  delete process.env.MOCK_CLAUDE_DELAY_MS;
   config.proxyApiKey = '';
   proxyApiKeyManager.resetApiKey('');
   config.allowMissingApiKeyHeader = true;
+  messageConcurrencyManager.clearQueue();
+  messageConcurrencyManager.configure({
+    maxConcurrent: config.maxConcurrentMessageRequests,
+    maxQueued: config.maxQueuedMessageRequests,
+  });
+  recentLogStore.clear();
 });
 
 test('GET / redirects browser clients to /docs', async () => {
@@ -327,6 +340,16 @@ test('GET /proxy-api-key requires docs authentication', async () => {
   assert.equal(body.ok, false);
 });
 
+test('GET /logs/recent requires docs authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/logs/recent`);
+
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+});
+
 test('POST /proxy-api-key updates the runtime x-api-key after docs login', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
   const cookie = await loginDocs(baseUrl);
@@ -455,6 +478,86 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
   });
 
   assert.equal(okResponse.status, 200);
+});
+
+test('GET /logs/recent returns recent entries and concurrency status for docs-authenticated users', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+
+  await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  const response = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.messageExecution.maxConcurrent, config.maxConcurrentMessageRequests);
+  assert.equal(body.messageExecution.maxQueued, config.maxQueuedMessageRequests);
+  assert.ok(Array.isArray(body.entries));
+  assert.ok(body.entries.some((entry) => entry.event === 'messages request completed'));
+});
+
+test('POST /v1/messages enforces configurable concurrency and queue limits', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'delayed reply';
+  process.env.MOCK_CLAUDE_DELAY_MS = '150';
+  messageConcurrencyManager.configure({
+    maxConcurrent: 1,
+    maxQueued: 1,
+  });
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  async function sendRequest() {
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 256,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    return {
+      status: response.status,
+      body: await response.json(),
+    };
+  }
+
+  const results = await Promise.all([sendRequest(), sendRequest(), sendRequest()]);
+  const statuses = results.map((result) => result.status).sort((left, right) => left - right);
+  assert.deepEqual(statuses, [200, 200, 429]);
+  const rejected = results.find((result) => result.status === 429);
+  assert.equal(rejected.body.error.type, 'rate_limit_error');
+
+  const cookie = await loginDocs(baseUrl);
+  const logResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const logBody = await logResponse.json();
+  assert.ok(logBody.entries.some((entry) => entry.event === 'message concurrency queued'));
+  assert.ok(logBody.entries.some((entry) => entry.event === 'message concurrency rejected'));
 });
 
 test('POST /v1/messages stays locked until x-api-key is configured when missing headers are disallowed', async () => {

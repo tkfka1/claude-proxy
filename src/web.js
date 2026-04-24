@@ -405,6 +405,10 @@ export function renderHomePage(config) {
             <div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div>
             <div class="muted">Anthropic Messages API 호환 요청. x-api-key 를 여기서 요구하도록 바꿀 수 있습니다.</div>
           </li>
+          <li>
+            <div><span class="method">GET</span> <span class="endpoint-path">/logs/recent</span></div>
+            <div class="muted">문서 로그인 후 최근 프록시 로그와 동시성 상태 확인</div>
+          </li>
         </ul>
       </section>
 
@@ -459,6 +463,25 @@ export function renderHomePage(config) {
         <article class="panel">
           <h2>예제 4 · 스트리밍 요청</h2>
           <pre id="stream-example">${escapeHtml(streamExample)}</pre>
+        </article>
+      </section>
+
+      <section class="split" style="margin-top: 20px;">
+        <article class="panel">
+          <h2>최근 로그 / 동시성 상태</h2>
+          <p class="muted">
+            최근 요청 로그와 현재 실행 중인 메시지 요청 수를 여기서 확인할 수 있습니다.
+            로그는 메모리 ring buffer 기준이라 최근 항목만 유지됩니다.
+          </p>
+          <div class="banner" style="margin-bottom: 16px;">
+            <div id="recent-log-summary"><strong>로그 상태 확인 중...</strong></div>
+            <div class="muted" style="margin-top: 8px;">자동 새로고침은 3초 간격입니다.</div>
+          </div>
+          <button id="recent-log-refresh" type="button" class="secondary">지금 새로고침</button>
+        </article>
+        <article class="panel">
+          <h2>최근 로그 출력</h2>
+          <pre id="recent-log-output">아직 읽어온 로그가 없습니다.</pre>
         </article>
       </section>
 
@@ -526,6 +549,9 @@ export function renderHomePage(config) {
         const proxyApiKeyReset = document.getElementById('proxy-api-key-reset');
         const messageExamplePre = document.getElementById('message-example');
         const streamExamplePre = document.getElementById('stream-example');
+        const recentLogSummary = document.getElementById('recent-log-summary');
+        const recentLogOutput = document.getElementById('recent-log-output');
+        const recentLogRefresh = document.getElementById('recent-log-refresh');
 
         const claudeAuthSummary = document.getElementById('claude-auth-summary');
         const claudeAuthDetail = document.getElementById('claude-auth-detail');
@@ -538,6 +564,7 @@ export function renderHomePage(config) {
         const claudeAuthSso = document.getElementById('claude-auth-sso');
         const claudeAuthLinks = document.getElementById('claude-auth-links');
         let claudeAuthPollTimer = null;
+        let recentLogTimer = null;
         let proxyApiKeyConfigured = ${JSON.stringify(Boolean(config.proxyApiKey))};
         let proxyApiKeyHeaderRequired = ${JSON.stringify(headerRequired)};
 
@@ -627,6 +654,36 @@ export function renderHomePage(config) {
           }
         }
 
+        function formatRecentLogEntry(entry) {
+          const header = '[' + entry.at + '] ' + String(entry.level || 'info').toUpperCase() + ' ' + entry.event;
+          const details = entry.details && Object.keys(entry.details).length
+            ? '\\n' + JSON.stringify(entry.details, null, 2)
+            : '';
+          return header + details;
+        }
+
+        function renderRecentLogs(payload) {
+          const stats = payload.messageExecution || {};
+          const concurrencyLabel = stats.enabled
+            ? ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued)
+            : 'unlimited';
+          recentLogSummary.innerHTML = '<strong>동시성</strong> ' + concurrencyLabel;
+          const entries = Array.isArray(payload.entries) ? payload.entries : [];
+          recentLogOutput.textContent = entries.length
+            ? entries.map(formatRecentLogEntry).join('\\n\\n')
+            : '아직 최근 로그가 없습니다.';
+        }
+
+        async function refreshRecentLogs() {
+          try {
+            const payload = await fetchJson('/logs/recent');
+            renderRecentLogs(payload);
+          } catch (error) {
+            recentLogSummary.innerHTML = '<strong>최근 로그 확인 실패</strong>';
+            recentLogOutput.textContent = error.message;
+          }
+        }
+
         proxyApiKeyForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           syncProxyApiKeyButtons(true);
@@ -647,6 +704,10 @@ export function renderHomePage(config) {
           } finally {
             syncProxyApiKeyButtons(false);
           }
+        });
+
+        recentLogRefresh.addEventListener('click', () => {
+          void refreshRecentLogs();
         });
 
         proxyApiKeyReset.addEventListener('click', async () => {
@@ -824,8 +885,10 @@ export function renderHomePage(config) {
         });
 
         refreshProxyApiKeyState();
+        refreshRecentLogs();
         refreshClaudeAuthStatus();
         refreshClaudeAuthOperation();
+        recentLogTimer = setInterval(refreshRecentLogs, 3000);
       </script>
     `,
   });

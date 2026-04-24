@@ -36,6 +36,9 @@ export function loadConfig() {
   const webSessionTtlHours = parseIntegerEnv('WEB_SESSION_TTL_HOURS', 12);
   const webLoginMaxAttempts = parseIntegerEnv('WEB_LOGIN_MAX_ATTEMPTS', 5);
   const webLoginWindowMinutes = parseIntegerEnv('WEB_LOGIN_WINDOW_MINUTES', 15);
+  const maxConcurrentMessageRequests = parseIntegerEnv('MAX_CONCURRENT_MESSAGE_REQUESTS', 4);
+  const maxQueuedMessageRequests = parseIntegerEnv('MAX_QUEUED_MESSAGE_REQUESTS', 16);
+  const recentLogLimit = parseIntegerEnv('RECENT_LOG_LIMIT', 200);
 
   if (!Array.isArray(extraArgs)) {
     throw new Error('CLAUDE_EXTRA_ARGS_JSON must be a JSON array');
@@ -51,6 +54,18 @@ export function loadConfig() {
 
   if (webLoginMaxAttempts > 0 && webLoginWindowMinutes <= 0) {
     throw new Error('WEB_LOGIN_WINDOW_MINUTES must be greater than 0 when WEB_LOGIN_MAX_ATTEMPTS is enabled');
+  }
+
+  if (maxConcurrentMessageRequests < 0) {
+    throw new Error('MAX_CONCURRENT_MESSAGE_REQUESTS must be 0 or greater');
+  }
+
+  if (maxQueuedMessageRequests < 0) {
+    throw new Error('MAX_QUEUED_MESSAGE_REQUESTS must be 0 or greater');
+  }
+
+  if (recentLogLimit <= 0) {
+    throw new Error('RECENT_LOG_LIMIT must be greater than 0');
   }
 
   validateWebPasswordSettings({
@@ -72,6 +87,9 @@ export function loadConfig() {
     defaultAnthropicVersion: process.env.DEFAULT_ANTHROPIC_VERSION || '2023-06-01',
     allowMissingApiKeyHeader: parseBooleanEnv('ALLOW_MISSING_API_KEY_HEADER', true),
     enableRequestLogging: parseBooleanEnv('ENABLE_REQUEST_LOGGING', true),
+    maxConcurrentMessageRequests,
+    maxQueuedMessageRequests,
+    recentLogLimit,
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
     webSessionTtlHours,
