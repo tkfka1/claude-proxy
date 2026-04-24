@@ -30,7 +30,7 @@ CLAUDE_DIR=$HOME/.claude \
 ./deploy/k8s/create-claude-auth-secret.sh
 ```
 
-## 2) 프록시 API key Secret 생성
+## 2) 프록시 API key Secret 생성 (optional legacy bootstrap)
 
 ```bash
 PROXY_API_KEY='replace-with-strong-random-value' \
@@ -41,6 +41,10 @@ PROXY_API_KEY='replace-with-strong-random-value' \
 
 - namespace: `claude-proxy`
 - secret name: `claude-proxy-env`
+
+지금 기본 운영 경로에서는 **필수 아님** 입니다.
+차트가 PVC에 `/docs` x-api-key 상태를 유지하므로, 첫 배포 후 `/docs` 에 로그인해서 키를 한 번 저장하면 됩니다.
+이 스크립트는 "처음부터 env/Secret으로 키를 넣고 시작하고 싶다"는 경우에만 optional bootstrap 용도로 씁니다.
 
 ## 3) Helm 배포
 
@@ -57,7 +61,8 @@ PROXY_API_KEY='replace-with-strong-random-value' \
 `values-prod.yaml` 는 아래 secret 이름을 기본 사용합니다.
 
 - `claudeAuth.existingSecret=claude-auth`
-- `proxyApiKey.existingSecret=claude-proxy-env`
+- `proxyState.persistence.enabled=true`
+- `proxyApiKey` secret 기본값은 비워 둠
 
 ### dry-run
 
@@ -72,24 +77,22 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
-### `/docs` x-api-key 유지용 PVC 추가
+### 기본 운영 동작
 
-`/docs` 에서 저장한 x-api-key 를 재시작 후에도 유지하려면 PVC values 를 추가하세요.
+`values-prod.yaml` 는 이제 PVC 친화적인 단일 replica 시작점입니다.
 
-```bash
-EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml \
-./deploy/k8s/deploy-helm.sh
-```
+- `/docs` 에서 저장한 x-api-key 가 PVC에 유지됨
+- 초기엔 `/v1/messages` 가 잠겨 있고
+- `/docs` 에 로그인해서 x-api-key 를 한 번 저장하면 이후 재시작해도 그대로 유지됨
 
-기본 예시는 single replica 기준입니다.
 여러 replica에서 공유 상태를 쓰려면 shared RWX 스토리지와 동시성 리스크를 직접 감수해야 합니다.
+그 경우에만 별도 values override 와 `proxyState.persistence.allowSharedState=true` 를 명시하세요.
 
 ### 이미지/secret 이름 오버라이드
 
 ```bash
 IMAGE_TAG=1.1.0 \
 CLAUDE_AUTH_SECRET=claude-auth \
-PROXY_ENV_SECRET=claude-proxy-env \
 ./deploy/k8s/deploy-helm.sh
 ```
 
@@ -98,7 +101,6 @@ PROXY_ENV_SECRET=claude-proxy-env \
 ```bash
 IMAGE_TAG=main \
 CLAUDE_AUTH_SECRET=claude-auth \
-PROXY_ENV_SECRET=claude-proxy-env \
 ./deploy/k8s/deploy-helm.sh
 ```
 

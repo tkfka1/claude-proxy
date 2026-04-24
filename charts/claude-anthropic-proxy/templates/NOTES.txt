@@ -23,3 +23,12 @@
 {{- else }}
   No Claude auth secret configured. The pod will likely fail to authenticate unless your image supplies credentials another way.
 {{- end }}
+
+3. x-api-key bootstrap:
+{{- if or .Values.proxyApiKey.existingSecret (ne (default "" .Values.proxyApiKey.value) "") }}
+  A bootstrap PROXY_API_KEY is configured for the pod.
+{{- else if not (eq (printf "%v" (index .Values.env "ALLOW_MISSING_API_KEY_HEADER")) "true") }}
+  /v1/messages stays locked until you sign in to /docs and save the first x-api-key.
+{{- else }}
+  /v1/messages currently allows requests without a configured x-api-key.
+{{- end }}

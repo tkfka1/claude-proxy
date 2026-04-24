@@ -573,6 +573,14 @@ function applyProxyAuth(req, requestId) {
     throw new ProxyError(400, 'invalid_request_error', 'anthropic-version header is required');
   }
 
+  if (!configuredProxyApiKey && !config.allowMissingApiKeyHeader) {
+    throw new ProxyError(
+      503,
+      'api_error',
+      'x-api-key is not configured yet. Sign in to /docs and set it before using /v1/messages.',
+    );
+  }
+
   if (!config.allowMissingApiKeyHeader && !apiKey) {
     throw new ProxyError(401, 'authentication_error', 'x-api-key header is required');
   }

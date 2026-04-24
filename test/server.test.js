@@ -92,6 +92,7 @@ test.beforeEach(() => {
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
   config.proxyApiKey = '';
   proxyApiKeyManager.resetApiKey('');
+  config.allowMissingApiKeyHeader = true;
 });
 
 test('GET / redirects browser clients to /docs', async () => {
@@ -454,6 +455,32 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
   });
 
   assert.equal(okResponse.status, 200);
+});
+
+test('POST /v1/messages stays locked until x-api-key is configured when missing headers are disallowed', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
+  config.allowMissingApiKeyHeader = false;
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': 'anything-at-all',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error.type, 'api_error');
+  assert.match(body.error.message, /x-api-key is not configured yet/);
 });
 
 test('POST /claude-auth/login starts Claude login and updates auth state', async () => {

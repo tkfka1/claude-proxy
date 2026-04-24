@@ -1,4 +1,4 @@
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: ghcr.io/tkfka1/claude-proxy
@@ -19,13 +19,12 @@ resources:
     memory: 1Gi
 
 podDisruptionBudget:
-  enabled: true
-  minAvailable: 1
+  enabled: false
 
 autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 5
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 80
 
 env:
@@ -41,9 +40,10 @@ env:
   REQUIRE_ANTHROPIC_VERSION: "true"
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
 
-proxyApiKey:
-  existingSecret: claude-proxy-env
-  existingSecretKey: PROXY_API_KEY
+proxyState:
+  persistence:
+    enabled: true
+    size: 1Gi
 
 claudeAuth:
   existingSecret: claude-auth

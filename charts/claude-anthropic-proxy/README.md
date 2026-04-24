@@ -33,7 +33,7 @@ kubectl create secret generic claude-auth \
   --from-file=settings.json=$HOME/.claude/settings.json
 ```
 
-## 프록시 API key Secret
+## 프록시 API key Secret (optional bootstrap)
 
 운영에서는 values 파일에 평문 키를 넣지 말고 Secret으로 넣는 것을 권장합니다.
 
@@ -50,6 +50,10 @@ kubectl create secret generic claude-proxy-env \
   --from-literal=PROXY_API_KEY='replace-with-strong-random-value'
 ```
 
+지금 기본 운영 흐름에서는 이 Secret이 **필수는 아닙니다**.
+차트에서 PVC를 붙여 `/docs` 에서 설정한 x-api-key 를 유지할 수 있으므로,
+처음 부팅 후 `/docs` 에서 키를 저장하는 쪽이 기본 경로입니다.
+
 ## 설치
 
 가장 쉬운 방법:
@@ -65,8 +69,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   -n claude-proxy \
   --create-namespace \
   -f charts/claude-anthropic-proxy/values-prod.yaml \
-  --set claudeAuth.existingSecret=claude-auth \
-  --set proxyApiKey.existingSecret=claude-proxy-env
+  --set claudeAuth.existingSecret=claude-auth
 ```
 
 ## Ingress + cert-manager 예시
@@ -81,6 +84,9 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ## x-api-key state PVC 예시
 
 `/docs` 에서 바꾼 x-api-key 를 재시작 후에도 유지하려면 PVC를 붙여야 합니다.
+
+`values-prod.yaml` 자체가 이미 PVC 친화적인 single replica 시작점입니다.
+아래 예시는 기본값을 더 작은 values 파일로 켜는 예시입니다.
 
 기본 안전장치는 single replica 기준입니다.
 `proxyState.persistence.enabled=true` 일 때는:
@@ -98,8 +104,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   -n claude-proxy \
   --create-namespace \
   -f charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml \
-  --set claudeAuth.existingSecret=claude-auth \
-  --set proxyApiKey.existingSecret=claude-proxy-env
+  --set claudeAuth.existingSecret=claude-auth
 ```
 
 ## ExternalSecret 예시
@@ -167,9 +172,6 @@ env:
   CLAUDE_DEFAULT_MODEL: sonnet
   ENABLE_REQUEST_LOGGING: "false"
   ALLOW_MISSING_API_KEY_HEADER: "false"
-
-proxyApiKey:
-  existingSecret: claude-proxy-env
 
 proxyState:
   persistence:
