@@ -7,10 +7,16 @@ import {
   truncateByStopSequences,
 } from '../src/anthropic.js';
 import {
+  validateWebPasswordSettings,
   createScryptPasswordHash,
   parseScryptPasswordHash,
   verifyWebPassword,
 } from '../src/web-auth.js';
+import {
+  createProxyApiKeyManager,
+  maskProxyApiKey,
+  validateProxyApiKeyInput,
+} from '../src/proxy-api-key.js';
 
 test('buildClaudePrompt formats conversation history', () => {
   const prompt = buildClaudePrompt([
@@ -60,4 +66,35 @@ test('createScryptPasswordHash and verifyWebPassword support hashed web password
 test('verifyWebPassword supports plaintext fallback', () => {
   assert.equal(verifyWebPassword('docs-secret', { webPassword: 'docs-secret' }), true);
   assert.equal(verifyWebPassword('wrong-password', { webPassword: 'docs-secret' }), false);
+});
+
+test('validateWebPasswordSettings requires a docs password or hash', () => {
+  assert.throws(
+    () => validateWebPasswordSettings({ webPassword: '', webPasswordHash: '' }),
+    /Set WEB_PASSWORD or WEB_PASSWORD_HASH/,
+  );
+  assert.throws(
+    () => validateWebPasswordSettings({ webPassword: 'replace-with-strong-docs-password', webPasswordHash: '' }),
+    /must be replaced with a real secret/,
+  );
+});
+
+test('proxy api key helpers validate, mask, and update runtime state', () => {
+  assert.throws(() => validateProxyApiKeyInput('short'), /at least 8 characters/);
+  assert.equal(maskProxyApiKey('runtime-secret-key'), 'runt…ey');
+
+  const manager = createProxyApiKeyManager();
+  assert.deepEqual(manager.getStatus(), {
+    configured: false,
+    maskedApiKey: null,
+    updatedAt: null,
+  });
+
+  const updated = manager.setApiKey('runtime-secret-key');
+  assert.equal(updated.apiKey, 'runtime-secret-key');
+  assert.equal(updated.configured, true);
+  assert.equal(updated.maskedApiKey, 'runt…ey');
+
+  manager.resetApiKey('');
+  assert.equal(manager.getStatus().configured, false);
 });

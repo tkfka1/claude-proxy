@@ -17,7 +17,7 @@ process.env.WEB_LOGIN_WINDOW_MINUTES = '1';
 process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(__dirname, '.mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 
-const { server } = await import('../src/server.js');
+const { config, proxyApiKeyManager, server } = await import('../src/server.js');
 
 function resetMockClaudeAuthState(state = {}) {
   fs.writeFileSync(
@@ -85,6 +85,8 @@ test.after(async () => {
 test.beforeEach(() => {
   resetMockClaudeAuthState();
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
+  config.proxyApiKey = '';
+  proxyApiKeyManager.resetApiKey('');
 });
 
 test('GET / redirects browser clients to /docs', async () => {
@@ -177,6 +179,8 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /Claude CLI 로그인/);
   assert.match(body, /\/claude-auth\/status/);
   assert.match(body, /SSO 강제 사용/);
+  assert.match(body, /x-api-key 저장/);
+  assert.match(body, /\/proxy-api-key/);
 });
 
 test('POST /login rejects an invalid password', async () => {
@@ -304,6 +308,109 @@ test('GET /claude-auth/status requires docs authentication', async () => {
   assert.equal(response.status, 401);
   const body = await response.json();
   assert.equal(body.ok, false);
+});
+
+test('GET /proxy-api-key requires docs authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/proxy-api-key`);
+
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+});
+
+test('POST /proxy-api-key updates the runtime x-api-key after docs login', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+
+  const updateResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      apiKey: 'runtime-secret-key',
+    }),
+  });
+
+  assert.equal(updateResponse.status, 200);
+  const updateBody = await updateResponse.json();
+  assert.equal(updateBody.ok, true);
+  assert.equal(updateBody.apiKey, 'runtime-secret-key');
+  assert.equal(updateBody.settings.configured, true);
+  assert.equal(updateBody.settings.headerRequired, true);
+
+  const statusResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    headers: {
+      cookie,
+    },
+  });
+
+  assert.equal(statusResponse.status, 200);
+  const statusBody = await statusResponse.json();
+  assert.equal(statusBody.settings.configured, true);
+  assert.equal(statusBody.settings.headerRequired, true);
+  assert.equal(statusBody.settings.maskedApiKey, 'runt…ey');
+  assert.equal('apiKey' in statusBody, false);
+});
+
+test('POST /proxy-api-key can generate a runtime key and /v1/messages starts requiring it', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+
+  const updateResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      generate: true,
+    }),
+  });
+
+  assert.equal(updateResponse.status, 200);
+  const updateBody = await updateResponse.json();
+  assert.equal(updateBody.ok, true);
+  assert.equal(updateBody.settings.configured, true);
+  assert.equal(updateBody.settings.headerRequired, true);
+  assert.match(updateBody.apiKey, /^[A-Za-z0-9_-]{20,}$/);
+
+  const missingHeaderResponse = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(missingHeaderResponse.status, 401);
+  const missingHeaderBody = await missingHeaderResponse.json();
+  assert.equal(missingHeaderBody.error.message, 'x-api-key header is required');
+
+  const okResponse = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': updateBody.apiKey,
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(okResponse.status, 200);
 });
 
 test('POST /claude-auth/login starts Claude login and updates auth state', async () => {

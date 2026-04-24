@@ -310,33 +310,23 @@ export function renderLoginPage({ errorMessage = '', loginPath = '/login' } = {}
   });
 }
 
-export function renderHomePage(config) {
-  const defaultAnthropicVersion = escapeHtml(config.defaultAnthropicVersion);
-  const defaultModel = escapeHtml(config.claudeDefaultModel);
-  const baseUrl = escapeHtml(`http://localhost:${config.port}`);
-  const webDocsAuthEnabled = Boolean(config.webPassword || config.webPasswordHash);
-  const apiKeyNote = config.proxyApiKey
-    ? '이 서버는 PROXY_API_KEY 가 설정되어 있으니 x-api-key 헤더도 같이 보내야 합니다.'
-    : 'PROXY_API_KEY 를 설정하지 않았다면 x-api-key 헤더는 생략해도 됩니다.';
-  const authHeaderLine = config.proxyApiKey
-    ? "  -H 'x-api-key: <your-proxy-api-key>' \\\n"
-    : '';
+function buildMessageExamples({ baseUrl, defaultAnthropicVersion, includeApiKeyHeader }) {
+  const authHeaderLine = includeApiKeyHeader ? "  -H 'x-api-key: <your-proxy-api-key>' \\\n" : '';
 
-  const healthExample = escapeHtml(`curl ${baseUrl}/health`);
-  const modelsExample = escapeHtml(`curl ${baseUrl}/v1/models`);
-  const messageExample = escapeHtml(`curl ${baseUrl}/v1/messages \\
+  return {
+    messageExample: `curl ${baseUrl}/v1/messages \\
   -H 'content-type: application/json' \\
-  -H 'anthropic-version: ${config.defaultAnthropicVersion}' \\
+  -H 'anthropic-version: ${defaultAnthropicVersion}' \\
 ${authHeaderLine}  -d '{
     "model": "claude-sonnet-4-20250514",
     "max_tokens": 512,
     "messages": [
       {"role": "user", "content": "안녕하세요"}
     ]
-  }'`);
-  const streamExample = escapeHtml(`curl -N ${baseUrl}/v1/messages \\
+  }'`,
+    streamExample: `curl -N ${baseUrl}/v1/messages \\
   -H 'content-type: application/json' \\
-  -H 'anthropic-version: ${config.defaultAnthropicVersion}' \\
+  -H 'anthropic-version: ${defaultAnthropicVersion}' \\
 ${authHeaderLine}  -d '{
     "model": "claude-sonnet-4-20250514",
     "max_tokens": 512,
@@ -344,9 +334,133 @@ ${authHeaderLine}  -d '{
     "messages": [
       {"role": "user", "content": "짧게 자기소개 해줘"}
     ]
-  }'`);
-  const claudeAuthSection = webDocsAuthEnabled
-    ? `
+  }'`,
+  };
+}
+
+export function renderHomePage(config) {
+  const defaultAnthropicVersion = escapeHtml(config.defaultAnthropicVersion);
+  const defaultModel = escapeHtml(config.claudeDefaultModel);
+  const baseUrl = `http://localhost:${config.port}`;
+  const headerRequired = Boolean(config.proxyApiKey) || !config.allowMissingApiKeyHeader;
+  const apiKeyNote = config.proxyApiKey
+    ? '이 서버는 고정 x-api-key 가 설정되어 있으니 /v1/messages 호출 때 같은 값을 헤더로 보내야 합니다.'
+    : headerRequired
+      ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 호출 때 x-api-key 헤더 자체는 필요합니다.'
+      : '아직 런타임 x-api-key 가 없어서 /v1/messages 호출은 헤더 없이도 들어옵니다.';
+  const { messageExample, streamExample } = buildMessageExamples({
+    baseUrl,
+    defaultAnthropicVersion: config.defaultAnthropicVersion,
+    includeApiKeyHeader: headerRequired,
+  });
+
+  return renderLayout({
+    title: 'claude-anthropic-proxy docs',
+    eyebrow: 'Authenticated endpoint guide',
+    body: `
+      <div class="topbar">
+        <div>
+          <h1>claude-anthropic-proxy</h1>
+          <p class="lede">
+            이 웹 화면은 간단한 운영 문서 페이지입니다.
+            문서 비밀번호는 항상 필요하고, 로그인 후에는 엔드포인트 예제와 x-api-key, Claude CLI 로그인 상태를 같이 관리할 수 있습니다.
+          </p>
+        </div>
+        <form method="post" action="/logout"><button type="submit" class="secondary">로그아웃</button></form>
+      </div>
+
+      <div class="grid">
+        <article class="panel">
+          <h2>기본 정보</h2>
+          <p>기본 Anthropic 버전: <span class="inline-code">${defaultAnthropicVersion}</span></p>
+          <p>기본 Claude 모델 alias: <span class="inline-code">${defaultModel}</span></p>
+          <p class="muted" id="proxy-api-key-note">${escapeHtml(apiKeyNote)}</p>
+        </article>
+        <article class="panel">
+          <h2>웹 인증</h2>
+          <p>
+            ${config.webPasswordHash
+              ? '문서 화면은 해시된 비밀번호 검증 후 접근됩니다.'
+              : '문서 화면은 비밀번호 로그인 후 접근됩니다.'}
+          </p>
+          <p class="muted">
+            서버는 시작 전에 <span class="inline-code">WEB_PASSWORD</span> 또는
+            <span class="inline-code">WEB_PASSWORD_HASH</span> 가 반드시 필요합니다.
+          </p>
+        </article>
+      </div>
+
+      <section class="panel" style="margin-top: 20px;">
+        <h2>엔드포인트</h2>
+        <ul class="endpoint-list">
+          <li>
+            <div><span class="method">GET</span> <span class="endpoint-path">/health</span></div>
+            <div class="muted">서버 생존 여부 확인</div>
+          </li>
+          <li>
+            <div><span class="method">GET</span> <span class="endpoint-path">/v1/models</span></div>
+            <div class="muted">사용 가능한 Claude CLI alias 확인</div>
+          </li>
+          <li>
+            <div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div>
+            <div class="muted">Anthropic Messages API 호환 요청. x-api-key 를 여기서 요구하도록 바꿀 수 있습니다.</div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="split" style="margin-top: 20px;">
+        <article class="panel">
+          <h2>x-api-key 설정</h2>
+          <p class="muted">
+            문서 로그인 후 여기서 프록시가 검사할 <span class="inline-code">x-api-key</span> 값을 바꿀 수 있습니다.
+            값은 현재 서버 프로세스 메모리에 저장되고, 프로세스를 재시작하면 환경 변수 기본값으로 돌아갑니다.
+          </p>
+          <div class="banner" style="margin-bottom: 16px;">
+            <div id="proxy-api-key-summary"><strong>상태 확인 중...</strong></div>
+            <div id="proxy-api-key-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
+          </div>
+          <form id="proxy-api-key-form">
+            <label>
+              새 x-api-key
+              <input id="proxy-api-key-input" type="password" minlength="8" placeholder="8자 이상 입력" required />
+            </label>
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+              <button id="proxy-api-key-submit" type="submit">x-api-key 저장</button>
+              <button id="proxy-api-key-generate" type="button" class="secondary">랜덤 생성</button>
+            </div>
+          </form>
+        </article>
+        <article class="panel">
+          <h2>현재 키 / 전달 메모</h2>
+          <p class="muted">
+            저장 직후에는 새 키 원문을 한 번 보여줍니다. 이후 새로고침하면 마스킹된 상태만 보입니다.
+          </p>
+          <pre id="proxy-api-key-preview">현재 설정된 x-api-key 가 없습니다.</pre>
+        </article>
+      </section>
+
+      <section class="split" style="margin-top: 20px;">
+        <article class="panel">
+          <h2>예제 1 · health</h2>
+          <pre>${escapeHtml(`curl ${baseUrl}/health`)}</pre>
+        </article>
+        <article class="panel">
+          <h2>예제 2 · models</h2>
+          <pre>${escapeHtml(`curl ${baseUrl}/v1/models`)}</pre>
+        </article>
+      </section>
+
+      <section class="split" style="margin-top: 20px;">
+        <article class="panel">
+          <h2>예제 3 · 일반 메시지 요청</h2>
+          <pre id="message-example">${escapeHtml(messageExample)}</pre>
+        </article>
+        <article class="panel">
+          <h2>예제 4 · 스트리밍 요청</h2>
+          <pre id="stream-example">${escapeHtml(streamExample)}</pre>
+        </article>
+      </section>
+
       <section class="split" style="margin-top: 20px;">
         <article class="panel">
           <h2>Claude CLI 로그인</h2>
@@ -397,7 +511,21 @@ ${authHeaderLine}  -d '{
           <pre id="claude-auth-operation">아직 실행된 Claude 인증 작업이 없습니다.</pre>
         </article>
       </section>
+
       <script>
+        const docsBaseUrl = ${JSON.stringify(baseUrl)};
+        const docsAnthropicVersion = ${JSON.stringify(config.defaultAnthropicVersion)};
+        const proxyApiKeySummary = document.getElementById('proxy-api-key-summary');
+        const proxyApiKeyDetail = document.getElementById('proxy-api-key-detail');
+        const proxyApiKeyPreview = document.getElementById('proxy-api-key-preview');
+        const proxyApiKeyNote = document.getElementById('proxy-api-key-note');
+        const proxyApiKeyForm = document.getElementById('proxy-api-key-form');
+        const proxyApiKeyInput = document.getElementById('proxy-api-key-input');
+        const proxyApiKeySubmit = document.getElementById('proxy-api-key-submit');
+        const proxyApiKeyGenerate = document.getElementById('proxy-api-key-generate');
+        const messageExamplePre = document.getElementById('message-example');
+        const streamExamplePre = document.getElementById('stream-example');
+
         const claudeAuthSummary = document.getElementById('claude-auth-summary');
         const claudeAuthDetail = document.getElementById('claude-auth-detail');
         const claudeAuthOperation = document.getElementById('claude-auth-operation');
@@ -409,6 +537,8 @@ ${authHeaderLine}  -d '{
         const claudeAuthSso = document.getElementById('claude-auth-sso');
         const claudeAuthLinks = document.getElementById('claude-auth-links');
         let claudeAuthPollTimer = null;
+        let proxyApiKeyConfigured = ${JSON.stringify(Boolean(config.proxyApiKey))};
+        let proxyApiKeyHeaderRequired = ${JSON.stringify(headerRequired)};
 
         async function fetchJson(url, options) {
           const response = await fetch(url, options);
@@ -419,7 +549,124 @@ ${authHeaderLine}  -d '{
           return payload;
         }
 
-        function renderStatus(status) {
+        function buildMessageExample(stream) {
+          const lines = [
+            'curl' + (stream ? ' -N ' : ' ') + docsBaseUrl + '/v1/messages \\\\',
+            "  -H 'content-type: application/json' \\\\",
+            "  -H 'anthropic-version: " + docsAnthropicVersion + "' \\\\",
+          ];
+
+          if (proxyApiKeyHeaderRequired) {
+            lines.push("  -H 'x-api-key: <your-proxy-api-key>' \\\\");
+          }
+
+          lines.push("  -d '{");
+          lines.push('    "model": "claude-sonnet-4-20250514",');
+          lines.push('    "max_tokens": 512,');
+
+          if (stream) {
+            lines.push('    "stream": true,');
+          }
+
+          lines.push('    "messages": [');
+          lines.push(
+            stream
+              ? '      {"role": "user", "content": "짧게 자기소개 해줘"}'
+              : '      {"role": "user", "content": "안녕하세요"}',
+          );
+          lines.push('    ]');
+          lines.push("  }'");
+
+          return lines.join('\\n');
+        }
+
+        function renderProxyApiKeyState(settings, revealedApiKey) {
+          proxyApiKeyConfigured = Boolean(settings && settings.configured);
+          proxyApiKeyHeaderRequired = Boolean(settings && settings.headerRequired);
+          proxyApiKeySummary.innerHTML = proxyApiKeyConfigured
+            ? '<strong>x-api-key: 설정됨</strong>'
+            : '<strong>x-api-key: 아직 없음</strong>';
+          proxyApiKeyDetail.textContent = proxyApiKeyConfigured
+            ? [settings.maskedApiKey, settings.updatedAt ? new Date(settings.updatedAt).toLocaleString() : '']
+                .filter(Boolean)
+                .join(' · ')
+            : proxyApiKeyHeaderRequired
+              ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 요청에는 x-api-key 헤더가 필요합니다.'
+              : '아직 런타임 x-api-key 가 없습니다. 저장하면 이후 /v1/messages 요청에 헤더가 필요합니다.';
+          proxyApiKeyPreview.textContent = revealedApiKey
+            ? '새 x-api-key\\n' + revealedApiKey
+            : proxyApiKeyConfigured
+              ? '현재 마스킹된 값\\n' + (settings.maskedApiKey || '')
+              : '현재 설정된 x-api-key 가 없습니다.';
+          proxyApiKeyNote.textContent = proxyApiKeyConfigured
+            ? '이 서버는 고정 x-api-key 가 설정되어 있으니 /v1/messages 호출 때 같은 값을 헤더로 보내야 합니다.'
+            : proxyApiKeyHeaderRequired
+              ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 호출 때 x-api-key 헤더 자체는 필요합니다.'
+              : '아직 런타임 x-api-key 가 없어서 /v1/messages 호출은 헤더 없이도 들어옵니다.';
+          messageExamplePre.textContent = buildMessageExample(false);
+          streamExamplePre.textContent = buildMessageExample(true);
+        }
+
+        function syncProxyApiKeyButtons(disabled) {
+          proxyApiKeyInput.disabled = disabled;
+          proxyApiKeySubmit.disabled = disabled;
+          proxyApiKeyGenerate.disabled = disabled;
+        }
+
+        async function refreshProxyApiKeyState() {
+          try {
+            const payload = await fetchJson('/proxy-api-key');
+            renderProxyApiKeyState(payload.settings);
+          } catch (error) {
+            proxyApiKeySummary.innerHTML = '<strong>x-api-key 상태 확인 실패</strong>';
+            proxyApiKeyDetail.textContent = error.message;
+          }
+        }
+
+        proxyApiKeyForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          syncProxyApiKeyButtons(true);
+          try {
+            const payload = await fetchJson('/proxy-api-key', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                apiKey: proxyApiKeyInput.value.trim(),
+              }),
+            });
+            proxyApiKeyInput.value = '';
+            renderProxyApiKeyState(payload.settings, payload.apiKey);
+          } catch (error) {
+            proxyApiKeyPreview.textContent = error.message;
+          } finally {
+            syncProxyApiKeyButtons(false);
+          }
+        });
+
+        proxyApiKeyGenerate.addEventListener('click', async () => {
+          syncProxyApiKeyButtons(true);
+          try {
+            const payload = await fetchJson('/proxy-api-key', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                generate: true,
+              }),
+            });
+            proxyApiKeyInput.value = '';
+            renderProxyApiKeyState(payload.settings, payload.apiKey);
+          } catch (error) {
+            proxyApiKeyPreview.textContent = error.message;
+          } finally {
+            syncProxyApiKeyButtons(false);
+          }
+        });
+
+        function renderClaudeStatus(status) {
           if (!status || !status.loggedIn) {
             claudeAuthSummary.innerHTML = '<strong>Claude CLI: 로그아웃 상태</strong>';
             claudeAuthDetail.textContent = '웹에서 Claude 로그인을 시작할 수 있습니다.';
@@ -487,7 +734,7 @@ ${authHeaderLine}  -d '{
           }
         }
 
-        function syncButtons(running) {
+        function syncClaudeButtons(running) {
           claudeAuthLoginButton.disabled = running;
           claudeAuthLogoutButton.disabled = running;
           claudeAuthProvider.disabled = running;
@@ -498,7 +745,7 @@ ${authHeaderLine}  -d '{
         async function refreshClaudeAuthStatus() {
           try {
             const payload = await fetchJson('/claude-auth/status');
-            renderStatus(payload.status);
+            renderClaudeStatus(payload.status);
           } catch (error) {
             claudeAuthSummary.innerHTML = '<strong>Claude CLI 상태 확인 실패</strong>';
             claudeAuthDetail.textContent = error.message;
@@ -512,7 +759,7 @@ ${authHeaderLine}  -d '{
             claudeAuthOperation.textContent = formatOperation(operation);
             renderOperationLinks(operation);
             const running = operation && operation.status === 'running';
-            syncButtons(running);
+            syncClaudeButtons(running);
 
             if (running) {
               if (!claudeAuthPollTimer) {
@@ -525,7 +772,7 @@ ${authHeaderLine}  -d '{
             }
           } catch (error) {
             claudeAuthOperation.textContent = error.message;
-            syncButtons(false);
+            syncClaudeButtons(false);
             if (claudeAuthPollTimer) {
               clearInterval(claudeAuthPollTimer);
               claudeAuthPollTimer = null;
@@ -535,7 +782,7 @@ ${authHeaderLine}  -d '{
 
         claudeAuthLoginForm.addEventListener('submit', async (event) => {
           event.preventDefault();
-          syncButtons(true);
+          syncClaudeButtons(true);
           try {
             const payload = await fetchJson('/claude-auth/login', {
               method: 'POST',
@@ -553,12 +800,12 @@ ${authHeaderLine}  -d '{
             await refreshClaudeAuthOperation();
           } catch (error) {
             claudeAuthOperation.textContent = error.message;
-            syncButtons(false);
+            syncClaudeButtons(false);
           }
         });
 
         claudeAuthLogoutButton.addEventListener('click', async () => {
-          syncButtons(true);
+          syncClaudeButtons(true);
           try {
             const payload = await fetchJson('/claude-auth/logout', {
               method: 'POST',
@@ -568,103 +815,14 @@ ${authHeaderLine}  -d '{
             await refreshClaudeAuthOperation();
           } catch (error) {
             claudeAuthOperation.textContent = error.message;
-            syncButtons(false);
+            syncClaudeButtons(false);
           }
         });
 
+        refreshProxyApiKeyState();
         refreshClaudeAuthStatus();
         refreshClaudeAuthOperation();
       </script>
-    `
-    : `
-      <section class="panel" style="margin-top: 20px;">
-        <h2>Claude CLI 웹 로그인</h2>
-        <p class="muted">
-          웹에서 Claude 로그인/로그아웃을 실행하려면 먼저 문서 화면 비밀번호를 켜세요.
-          <span class="inline-code">WEB_PASSWORD</span> 또는
-          <span class="inline-code">WEB_PASSWORD_HASH</span> 를 설정하면 이 기능이 활성화됩니다.
-        </p>
-      </section>
-    `;
-
-  return renderLayout({
-    title: 'claude-anthropic-proxy docs',
-    eyebrow: 'Authenticated endpoint guide',
-    body: `
-      <div class="topbar">
-        <div>
-          <h1>claude-anthropic-proxy</h1>
-          <p class="lede">
-            이 웹 화면은 간단한 문서 페이지입니다.
-            실제 호출은 별도 API 경로로 진행하면 되고, 여기서는 엔드포인트와 기본 예제만 제공합니다.
-          </p>
-        </div>
-        ${webDocsAuthEnabled
-          ? `<form method="post" action="/logout"><button type="submit" class="secondary">로그아웃</button></form>`
-          : ''}
-      </div>
-
-      <div class="grid">
-        <article class="panel">
-          <h2>기본 정보</h2>
-          <p>기본 Anthropic 버전: <span class="inline-code">${defaultAnthropicVersion}</span></p>
-          <p>기본 Claude 모델 alias: <span class="inline-code">${defaultModel}</span></p>
-          <p class="muted">${escapeHtml(apiKeyNote)}</p>
-        </article>
-        <article class="panel">
-          <h2>웹 인증</h2>
-          <p>
-            ${config.webPasswordHash
-              ? '문서 화면은 해시된 비밀번호 검증 후 접근됩니다.'
-              : config.webPassword
-                ? '문서 화면은 비밀번호 로그인 후 접근됩니다.'
-                : '현재 WEB_PASSWORD / WEB_PASSWORD_HASH 가 비어 있어 문서 화면은 바로 열립니다.'}
-          </p>
-          <p class="muted">API 사용 자체는 /v1/messages, /v1/models, /health 경로로 분리되어 있습니다.</p>
-        </article>
-      </div>
-
-      <section class="panel" style="margin-top: 20px;">
-        <h2>엔드포인트</h2>
-        <ul class="endpoint-list">
-          <li>
-            <div><span class="method">GET</span> <span class="endpoint-path">/health</span></div>
-            <div class="muted">서버 생존 여부 확인</div>
-          </li>
-          <li>
-            <div><span class="method">GET</span> <span class="endpoint-path">/v1/models</span></div>
-            <div class="muted">사용 가능한 Claude CLI alias 확인</div>
-          </li>
-          <li>
-            <div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div>
-            <div class="muted">Anthropic Messages API 호환 요청</div>
-          </li>
-        </ul>
-      </section>
-
-      <section class="split" style="margin-top: 20px;">
-        <article class="panel">
-          <h2>예제 1 · health</h2>
-          <pre>${healthExample}</pre>
-        </article>
-        <article class="panel">
-          <h2>예제 2 · models</h2>
-          <pre>${modelsExample}</pre>
-        </article>
-      </section>
-
-      <section class="split" style="margin-top: 20px;">
-        <article class="panel">
-          <h2>예제 3 · 일반 메시지 요청</h2>
-          <pre>${messageExample}</pre>
-        </article>
-        <article class="panel">
-          <h2>예제 4 · 스트리밍 요청</h2>
-          <pre>${streamExample}</pre>
-        </article>
-      </section>
-
-      ${claudeAuthSection}
     `,
   });
 }

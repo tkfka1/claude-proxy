@@ -19,6 +19,7 @@ import {
   truncateByStopSequences,
 } from './anthropic.js';
 import { createClaudeAuthManager } from './claude-auth.js';
+import { createProxyApiKeyManager } from './proxy-api-key.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { verifyWebPassword } from './web-auth.js';
 import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
@@ -28,6 +29,7 @@ const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
+const proxyApiKeyManager = createProxyApiKeyManager({ initialApiKey: config.proxyApiKey });
 
 function log(...args) {
   if (!config.enableRequestLogging) return;
@@ -38,15 +40,29 @@ function isWebLoginEnabled() {
   return Boolean(config.webPassword || config.webPasswordHash);
 }
 
+function buildProxyApiKeySettings() {
+  const status = proxyApiKeyManager.getStatus();
+
+  return {
+    ...status,
+    headerRequired: status.configured || !config.allowMissingApiKeyHeader,
+  };
+}
+
 function buildServiceMetadata() {
   return {
     ...serviceMetadata,
     web_login_enabled: isWebLoginEnabled(),
+    proxy_api_key_configured: buildProxyApiKeySettings().configured,
     claude_auth_paths: {
       status: '/claude-auth/status',
       operation: '/claude-auth/operation',
       login: '/claude-auth/login',
       logout: '/claude-auth/logout',
+    },
+    proxy_api_key_paths: {
+      status: '/proxy-api-key',
+      update: '/proxy-api-key',
     },
   };
 }
@@ -503,9 +519,44 @@ function handleClaudeAuthLogout(req, res) {
   }
 }
 
+function handleProxyApiKeyStatus(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    settings: buildProxyApiKeySettings(),
+  });
+}
+
+async function handleProxyApiKeyUpdate(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req, 16 * 1024);
+    const next = body?.generate
+      ? proxyApiKeyManager.generateNewApiKey()
+      : proxyApiKeyManager.setApiKey(body?.apiKey);
+
+    config.proxyApiKey = next.apiKey;
+
+    json(res, 200, {
+      ok: true,
+      settings: buildProxyApiKeySettings(),
+      apiKey: next.apiKey,
+    });
+  } catch (error) {
+    jsonError(res, 400, error.message || 'Failed to update x-api-key.');
+  }
+}
+
 function applyProxyAuth(req, requestId) {
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
+  const configuredProxyApiKey = proxyApiKeyManager.getApiKey();
 
   if (config.requireAnthropicVersion && !anthropicVersion) {
     throw new ProxyError(400, 'invalid_request_error', 'anthropic-version header is required');
@@ -515,7 +566,11 @@ function applyProxyAuth(req, requestId) {
     throw new ProxyError(401, 'authentication_error', 'x-api-key header is required');
   }
 
-  if (config.proxyApiKey && apiKey !== config.proxyApiKey) {
+  if (configuredProxyApiKey && !apiKey) {
+    throw new ProxyError(401, 'authentication_error', 'x-api-key header is required');
+  }
+
+  if (configuredProxyApiKey && apiKey !== configuredProxyApiKey) {
     throw new ProxyError(401, 'authentication_error', 'Invalid API key');
   }
 
@@ -796,6 +851,16 @@ function requestHandler(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/proxy-api-key') {
+    handleProxyApiKeyStatus(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/proxy-api-key') {
+    void handleProxyApiKeyUpdate(req, res);
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     json(res, 200, {
       ok: true,
@@ -829,4 +894,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   startServer();
 }
 
-export { config, server, requestHandler, startServer };
+export { config, proxyApiKeyManager, server, requestHandler, startServer };

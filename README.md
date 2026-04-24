@@ -110,9 +110,10 @@ http://localhost:8080/docs
 ```
 
 브라우저로 루트(`/`)에 들어가도 자동으로 `/docs` 로 이동합니다.
-실제 API 경로는 그대로 유지되고, `WEB_PASSWORD` 또는 `WEB_PASSWORD_HASH` 를 설정하면
-먼저 비밀번호 로그인 화면이 뜹니다. 로그인 후에는 문서 화면에서
-Claude CLI 로그인 상태를 확인하고 웹에서 `claude auth login` / `logout` 을 실행할 수 있습니다.
+실제 API 경로는 그대로 유지되고, 서버는 시작 전에 `WEB_PASSWORD` 또는
+`WEB_PASSWORD_HASH` 가 반드시 필요합니다. 로그인 후에는 문서 화면에서
+Claude CLI 로그인 상태를 확인하고, 웹에서 `claude auth login` / `logout` 을 실행하고,
+런타임 `x-api-key` 값도 바로 바꿀 수 있습니다.
 
 JSON 메타 정보가 필요하면:
 
@@ -168,7 +169,7 @@ curl -N http://localhost:8080/v1/messages \
 
 ### 웹 문서 로그인 설정
 
-- `WEB_PASSWORD`: `/docs` 문서 화면 접근용 평문 비밀번호
+- `WEB_PASSWORD`: `/docs` 문서 화면 접근용 평문 비밀번호. 서버 시작 전에 반드시 필요
 - `WEB_PASSWORD_HASH`: `/docs` 문서 화면 접근용 scrypt 해시 비밀번호. 설정하면 `WEB_PASSWORD` 보다 우선
 - `WEB_SESSION_TTL_HOURS`: 로그인 세션 유지 시간(시간 단위, 기본값 `12`)
 - `WEB_LOGIN_MAX_ATTEMPTS`: 같은 클라이언트 IP 기준 로그인 최대 실패 횟수(기본값 `5`, `0`이면 비활성화)
@@ -177,7 +178,7 @@ curl -N http://localhost:8080/v1/messages \
 예:
 
 ```dotenv
-WEB_PASSWORD=change-this-password
+WEB_PASSWORD=replace-with-strong-docs-password
 WEB_SESSION_TTL_HOURS=12
 WEB_LOGIN_MAX_ATTEMPTS=5
 WEB_LOGIN_WINDOW_MINUTES=15
@@ -194,6 +195,18 @@ node --input-type=module -e "import { createScryptPasswordHash } from './src/web
 ```dotenv
 WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 ```
+
+둘 다 비워 두면 서버가 시작되지 않습니다.
+또한 `replace-with-...`, `change-this-...`, `<set-a-password>` 같은 placeholder 값도
+그대로 두면 시작 단계에서 거부합니다.
+
+### 웹에서 x-api-key 설정
+
+- `/docs` 로그인 후 문서 페이지에서 바로 설정 가능
+- 저장한 값은 현재 서버 프로세스 메모리에 반영되고, 즉시 `/v1/messages` 의 `x-api-key` 검증에 사용됨
+- 페이지에서 저장 직후 원문을 한 번 보여주고, 이후에는 마스킹된 상태만 표시
+- 프로세스를 재시작하면 환경 변수 `PROXY_API_KEY` 기본값으로 돌아감
+- 빈 값 대신 8자 이상 문자열만 허용
 
 ### Claude CLI 웹 로그인
 
@@ -220,7 +233,7 @@ CLAUDE_EXTRA_ARGS_JSON=["--verbose"]
 
 ### 프록시 인증 설정
 
-- `PROXY_API_KEY`: 프록시 자체 API 키
+- `PROXY_API_KEY`: 프록시 자체 API 키 bootstrap 값. 비워 두고 `/docs` 에서 나중에 설정해도 됨
 - `ALLOW_MISSING_API_KEY_HEADER`: `x-api-key` 없는 요청 허용 여부
 - `REQUIRE_ANTHROPIC_VERSION`: `anthropic-version` 헤더 필수 여부
 - `DEFAULT_ANTHROPIC_VERSION`: 기본 버전 문자열
@@ -231,6 +244,9 @@ API 키 강제 예시:
 PROXY_API_KEY=local-proxy-key
 ALLOW_MISSING_API_KEY_HEADER=false
 ```
+
+또는 서버를 띄운 뒤 `/docs` 에서 `x-api-key` 를 저장하면, 그 시점부터 `/v1/messages` 는
+헤더 없이는 들어오지 않습니다.
 
 요청 예시:
 
