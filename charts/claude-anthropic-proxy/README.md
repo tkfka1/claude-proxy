@@ -104,7 +104,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   -n claude-proxy \
   --create-namespace \
   --set image.repository=ghcr.io/tkfka1/claude-proxy \
-  --set image.tag=1.0.2 \
+  --set image.tag=1.1.0 \
   --set claudeAuth.createSecret=true \
   --set-file claudeAuth.inline.credentialsJson=$HOME/.claude/.credentials.json \
   --set-file claudeAuth.inline.settingsJson=$HOME/.claude/settings.json
@@ -132,7 +132,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 ```yaml
 image:
   repository: ghcr.io/tkfka1/claude-proxy
-  tag: "1.0.2"
+  tag: "1.1.0"
 
 env:
   CLAUDE_DEFAULT_MODEL: sonnet

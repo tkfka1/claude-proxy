@@ -7,7 +7,7 @@
 - `kubectl`, `helm` 설치
 - 현재 kube-context 가 대상 클러스터를 가리킴
 - Claude CLI 로그인 정보가 로컬 `~/.claude` 에 존재
-- 이미지 기본값은 `ghcr.io/tkfka1/claude-proxy:1.0.2`
+- 이미지 기본값은 `ghcr.io/tkfka1/claude-proxy:1.1.0`
 
 ## 1) Claude auth Secret 생성
 
@@ -74,7 +74,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ### 이미지/secret 이름 오버라이드
 
 ```bash
-IMAGE_TAG=1.0.2 \
+IMAGE_TAG=1.1.0 \
 CLAUDE_AUTH_SECRET=claude-auth \
 PROXY_ENV_SECRET=claude-proxy-env \
 ./deploy/k8s/deploy-helm.sh
@@ -95,5 +95,5 @@ curl http://127.0.0.1:8080/health
 태그만 바꿔 다시 실행하면 됩니다.
 
 ```bash
-IMAGE_TAG=1.0.2 ./deploy/k8s/deploy-helm.sh
+IMAGE_TAG=1.1.0 ./deploy/k8s/deploy-helm.sh
 ```
