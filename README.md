@@ -4,10 +4,11 @@
 
 ## 동작 방식
 
-1. 클라이언트가 `POST /v1/messages` 로 요청
-2. 프록시가 Anthropic 요청을 `claude` CLI 프롬프트로 변환
-3. `claude` CLI 실행
-4. 결과를 Anthropic Messages API 형식으로 재포장해서 응답
+1. 브라우저가 `/` 로 접속하면 `/docs` 로 이동
+2. 클라이언트가 `POST /v1/messages` 로 요청
+3. 프록시가 Anthropic 요청을 `claude` CLI 프롬프트로 변환
+4. `claude` CLI 실행
+5. 결과를 Anthropic Messages API 형식으로 재포장해서 응답
 
 ---
 
@@ -16,6 +17,13 @@
 - `POST /v1/messages`
 - `GET /v1/models`
 - `GET /health`
+- `GET /` 브라우저면 `/docs` 로 리다이렉트, 비브라우저면 JSON 메타 정보
+- `GET /docs` 비밀번호 로그인 가능한 문서 화면
+- `GET /api-info` JSON 메타 정보
+- `GET /claude-auth/status` Claude CLI 로그인 상태 조회 (문서 로그인 필요)
+- `GET /claude-auth/operation` Claude CLI 로그인/로그아웃 작업 상태 조회 (문서 로그인 필요)
+- `POST /claude-auth/login` 웹에서 Claude CLI 로그인 시작 (문서 로그인 필요)
+- `POST /claude-auth/logout` 웹에서 Claude CLI 로그아웃 시작 (문서 로그인 필요)
 - Anthropic 스타일 JSON 응답
 - `stream: true` 요청에 대한 SSE 응답
 - `system`, `messages`, `stop_sequences` 처리
@@ -95,7 +103,24 @@ http://0.0.0.0:8080
 curl http://localhost:8080/health
 ```
 
-### 5. 메시지 요청
+### 5. 브라우저에서 열기
+
+```text
+http://localhost:8080/docs
+```
+
+브라우저로 루트(`/`)에 들어가도 자동으로 `/docs` 로 이동합니다.
+실제 API 경로는 그대로 유지되고, `WEB_PASSWORD` 또는 `WEB_PASSWORD_HASH` 를 설정하면
+먼저 비밀번호 로그인 화면이 뜹니다. 로그인 후에는 문서 화면에서
+Claude CLI 로그인 상태를 확인하고 웹에서 `claude auth login` / `logout` 을 실행할 수 있습니다.
+
+JSON 메타 정보가 필요하면:
+
+```bash
+curl http://localhost:8080/api-info
+```
+
+### 6. 메시지 요청
 
 ```bash
 curl http://localhost:8080/v1/messages \
@@ -140,6 +165,44 @@ curl -N http://localhost:8080/v1/messages \
 - `PORT`: 포트 (기본값 `8080`)
 - `REQUEST_BODY_LIMIT_BYTES`: 요청 바디 최대 크기
 - `ENABLE_REQUEST_LOGGING`: 요청 로그 출력 여부
+
+### 웹 문서 로그인 설정
+
+- `WEB_PASSWORD`: `/docs` 문서 화면 접근용 평문 비밀번호
+- `WEB_PASSWORD_HASH`: `/docs` 문서 화면 접근용 scrypt 해시 비밀번호. 설정하면 `WEB_PASSWORD` 보다 우선
+- `WEB_SESSION_TTL_HOURS`: 로그인 세션 유지 시간(시간 단위, 기본값 `12`)
+- `WEB_LOGIN_MAX_ATTEMPTS`: 같은 클라이언트 IP 기준 로그인 최대 실패 횟수(기본값 `5`, `0`이면 비활성화)
+- `WEB_LOGIN_WINDOW_MINUTES`: 로그인 실패 제한 윈도우/차단 시간(분 단위, 기본값 `15`)
+
+예:
+
+```dotenv
+WEB_PASSWORD=change-this-password
+WEB_SESSION_TTL_HOURS=12
+WEB_LOGIN_MAX_ATTEMPTS=5
+WEB_LOGIN_WINDOW_MINUTES=15
+```
+
+해시를 쓰려면 예를 들어:
+
+```bash
+node --input-type=module -e "import { createScryptPasswordHash } from './src/web-auth.js'; console.log(createScryptPasswordHash('change-this-password'));"
+```
+
+출력값을 `.env` 에 넣습니다:
+
+```dotenv
+WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
+```
+
+### Claude CLI 웹 로그인
+
+- `/docs` 문서 화면 로그인 후 사용 가능
+- 웹 버튼은 서버 호스트에서 `claude auth login` / `claude auth logout` 을 실행
+- Claude Code 공식 문서 기준으로 인증은 브라우저 프롬프트 기반으로 진행됨
+- `Claude.ai` / `Anthropic Console` 선택 가능, 필요하면 SSO 강제 가능
+- 로그인 명령 출력에서 URL이 감지되면 웹 화면에 바로 링크로 표시
+- 원격 서버에 띄운 경우 브라우저가 **서버 쪽 환경**에서 열릴 수 있으니 주의
 
 ### Claude CLI 설정
 

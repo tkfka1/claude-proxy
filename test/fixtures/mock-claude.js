@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
+
 const args = process.argv.slice(2);
 const outputFormat = readArgValue('--output-format') || 'text';
 const model = readArgValue('--model') || 'sonnet';
@@ -11,6 +13,85 @@ const usage = {
   cache_creation_input_tokens: 0,
   cache_read_input_tokens: 0,
 };
+const authStateFile = process.env.MOCK_CLAUDE_AUTH_STATE_FILE || '';
+
+function readAuthState() {
+  if (!authStateFile || !fs.existsSync(authStateFile)) {
+    return {
+      loggedIn: process.env.MOCK_CLAUDE_AUTH_LOGGED_IN === 'true',
+      authMethod: process.env.MOCK_CLAUDE_AUTH_METHOD || 'claude.ai',
+      email: process.env.MOCK_CLAUDE_AUTH_EMAIL || null,
+    };
+  }
+
+  return JSON.parse(fs.readFileSync(authStateFile, 'utf8'));
+}
+
+function writeAuthState(state) {
+  if (!authStateFile) return;
+  fs.writeFileSync(authStateFile, JSON.stringify(state), 'utf8');
+}
+
+if (args[0] === 'auth' && args[1] === 'status') {
+  const state = readAuthState();
+  emit({
+    loggedIn: Boolean(state.loggedIn),
+    authMethod: state.loggedIn ? state.authMethod || 'claude.ai' : null,
+    apiProvider: 'firstParty',
+    email: state.loggedIn ? state.email || null : null,
+    orgId: state.loggedIn ? 'mock-org-id' : null,
+    orgName: state.loggedIn ? 'Mock Org' : null,
+    subscriptionType: state.loggedIn ? (state.authMethod === 'console' ? 'console' : 'max') : null,
+  });
+  process.exit(0);
+}
+
+if (args[0] === 'auth' && args[1] === 'login') {
+  if (process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL === 'true') {
+    process.stderr.write('Mock Claude login failed\n');
+    process.exit(1);
+  }
+
+  const provider = args.includes('--console') ? 'console' : 'claude.ai';
+  const email = readArgValue('--email') || 'web-login@example.com';
+  writeAuthState({
+    loggedIn: true,
+    authMethod: provider,
+    email,
+  });
+  process.stderr.write('Open browser to continue Claude login\n');
+  process.stderr.write(`https://claude.ai/mock-login?provider=${encodeURIComponent(provider)}&email=${encodeURIComponent(email)}\n`);
+  process.stderr.write(`provider=${provider} email=${email}\n`);
+  emit({
+    loggedIn: true,
+    authMethod: provider,
+    apiProvider: 'firstParty',
+    email,
+    orgId: 'mock-org-id',
+    orgName: 'Mock Org',
+    subscriptionType: provider === 'console' ? 'console' : 'max',
+  });
+  process.exit(0);
+}
+
+if (args[0] === 'auth' && args[1] === 'logout') {
+  writeAuthState({
+    loggedIn: false,
+    authMethod: null,
+    email: null,
+  });
+  process.stderr.write('Mock Claude logout complete\n');
+  emit({
+    loggedIn: false,
+    authMethod: null,
+    apiProvider: null,
+    email: null,
+    orgId: null,
+    orgName: null,
+    subscriptionType: null,
+  });
+  process.exit(0);
+}
 
 if (process.env.MOCK_CLAUDE_ERROR === 'auth') {
   if (outputFormat === 'stream-json') {

@@ -1,5 +1,7 @@
 import 'dotenv/config';
 
+import { validateWebPasswordSettings } from './web-auth.js';
+
 function parseJsonEnv(name, fallback) {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -30,10 +32,30 @@ function parseIntegerEnv(name, fallback) {
 export function loadConfig() {
   const modelMap = parseJsonEnv('CLAUDE_MODEL_MAP_JSON', {});
   const extraArgs = parseJsonEnv('CLAUDE_EXTRA_ARGS_JSON', []);
+  const webSessionTtlHours = parseIntegerEnv('WEB_SESSION_TTL_HOURS', 12);
+  const webLoginMaxAttempts = parseIntegerEnv('WEB_LOGIN_MAX_ATTEMPTS', 5);
+  const webLoginWindowMinutes = parseIntegerEnv('WEB_LOGIN_WINDOW_MINUTES', 15);
 
   if (!Array.isArray(extraArgs)) {
     throw new Error('CLAUDE_EXTRA_ARGS_JSON must be a JSON array');
   }
+
+  if (webSessionTtlHours <= 0) {
+    throw new Error('WEB_SESSION_TTL_HOURS must be greater than 0');
+  }
+
+  if (webLoginMaxAttempts < 0) {
+    throw new Error('WEB_LOGIN_MAX_ATTEMPTS must be 0 or greater');
+  }
+
+  if (webLoginMaxAttempts > 0 && webLoginWindowMinutes <= 0) {
+    throw new Error('WEB_LOGIN_WINDOW_MINUTES must be greater than 0 when WEB_LOGIN_MAX_ATTEMPTS is enabled');
+  }
+
+  validateWebPasswordSettings({
+    webPassword: process.env.WEB_PASSWORD || '',
+    webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
+  });
 
   return {
     host: process.env.HOST || '0.0.0.0',
@@ -48,6 +70,11 @@ export function loadConfig() {
     defaultAnthropicVersion: process.env.DEFAULT_ANTHROPIC_VERSION || '2023-06-01',
     allowMissingApiKeyHeader: parseBooleanEnv('ALLOW_MISSING_API_KEY_HEADER', true),
     enableRequestLogging: parseBooleanEnv('ENABLE_REQUEST_LOGGING', true),
+    webPassword: process.env.WEB_PASSWORD || '',
+    webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
+    webSessionTtlHours,
+    webLoginMaxAttempts,
+    webLoginWindowMinutes,
   };
 }
 

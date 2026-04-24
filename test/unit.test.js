@@ -6,6 +6,11 @@ import {
   normalizeSystemPrompt,
   truncateByStopSequences,
 } from '../src/anthropic.js';
+import {
+  createScryptPasswordHash,
+  parseScryptPasswordHash,
+  verifyWebPassword,
+} from '../src/web-auth.js';
 
 test('buildClaudePrompt formats conversation history', () => {
   const prompt = buildClaudePrompt([
@@ -39,4 +44,20 @@ test('truncateByStopSequences truncates at first stop sequence', () => {
     stopReason: 'end_turn',
     stopSequence: null,
   });
+});
+
+test('createScryptPasswordHash and verifyWebPassword support hashed web passwords', () => {
+  const hash = createScryptPasswordHash('docs-secret', '00112233445566778899aabbccddeeff');
+
+  assert.deepEqual(parseScryptPasswordHash(hash), {
+    saltHex: '00112233445566778899aabbccddeeff',
+    digestHex: hash.split('$')[2],
+  });
+  assert.equal(verifyWebPassword('docs-secret', { webPasswordHash: hash }), true);
+  assert.equal(verifyWebPassword('wrong-password', { webPasswordHash: hash }), false);
+});
+
+test('verifyWebPassword supports plaintext fallback', () => {
+  assert.equal(verifyWebPassword('docs-secret', { webPassword: 'docs-secret' }), true);
+  assert.equal(verifyWebPassword('wrong-password', { webPassword: 'docs-secret' }), false);
 });

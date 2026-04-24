@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 
 import { loadConfig, resolveCliModel } from './config.js';
@@ -17,13 +18,489 @@ import {
   writeSseEvent,
   truncateByStopSequences,
 } from './anthropic.js';
+import { createClaudeAuthManager } from './claude-auth.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
+import { verifyWebPassword } from './web-auth.js';
+import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
 
 const config = loadConfig();
+const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
+const webSessions = new Map();
+const webLoginAttempts = new Map();
+const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
 
 function log(...args) {
   if (!config.enableRequestLogging) return;
   console.log(new Date().toISOString(), ...args);
+}
+
+function isWebLoginEnabled() {
+  return Boolean(config.webPassword || config.webPasswordHash);
+}
+
+function buildServiceMetadata() {
+  return {
+    ...serviceMetadata,
+    web_login_enabled: isWebLoginEnabled(),
+    claude_auth_paths: {
+      status: '/claude-auth/status',
+      operation: '/claude-auth/operation',
+      login: '/claude-auth/login',
+      logout: '/claude-auth/logout',
+    },
+  };
+}
+
+function parseAcceptHeader(headerValue) {
+  return String(headerValue || '')
+    .split(',')
+    .map((entry, index) => {
+      const [rawType, ...rawParams] = entry.split(';').map((part) => part.trim());
+      if (!rawType) return null;
+
+      const qParam = rawParams.find((param) => param.startsWith('q='));
+      const qValue = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
+
+      return {
+        type: rawType.toLowerCase(),
+        q: Number.isFinite(qValue) ? qValue : 1,
+        index,
+      };
+    })
+    .filter((entry) => entry && entry.q > 0);
+}
+
+function matchAccept(entry, mimeType) {
+  const [candidateType, candidateSubtype] = mimeType.toLowerCase().split('/');
+  const [entryType, entrySubtype] = entry.type.split('/');
+
+  if (entryType === '*' && entrySubtype === '*') return 0;
+  if (entryType === candidateType && entrySubtype === '*') return 1;
+  if (entryType === candidateType && entrySubtype === candidateSubtype) return 2;
+  return -1;
+}
+
+function preferredContentType(req, supportedTypes) {
+  const accepted = parseAcceptHeader(req.headers.accept);
+  if (!accepted.length) return supportedTypes[0];
+
+  let best = null;
+
+  for (const supportedType of supportedTypes) {
+    for (const entry of accepted) {
+      const specificity = matchAccept(entry, supportedType);
+      if (specificity === -1) continue;
+
+      const candidate = {
+        supportedType,
+        q: entry.q,
+        specificity,
+        index: entry.index,
+      };
+
+      if (
+        !best ||
+        candidate.q > best.q ||
+        (candidate.q === best.q && candidate.specificity > best.specificity) ||
+        (candidate.q === best.q && candidate.specificity === best.specificity && candidate.index < best.index)
+      ) {
+        best = candidate;
+      }
+    }
+  }
+
+  return best?.supportedType || supportedTypes[0];
+}
+
+function prefersHtml(req) {
+  return preferredContentType(req, ['application/json', 'text/html']) === 'text/html';
+}
+
+function requestIsSecure(req) {
+  if (req.socket?.encrypted) return true;
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0]?.trim().toLowerCase();
+  return forwardedProto === 'https';
+}
+
+function html(res, status, body, extraHeaders = {}) {
+  const payload = Buffer.from(body, 'utf8');
+  res.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': payload.length,
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
+function jsonError(res, status, message, extra = {}) {
+  json(res, status, {
+    ok: false,
+    error: message,
+    ...extra,
+  });
+}
+
+function redirect(res, location, extraHeaders = {}) {
+  res.writeHead(303, {
+    location,
+    ...extraHeaders,
+  });
+  res.end();
+}
+
+function parseCookies(req) {
+  return String(req.headers.cookie || '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .reduce((cookies, entry) => {
+      const separatorIndex = entry.indexOf('=');
+      if (separatorIndex === -1) return cookies;
+
+      const name = entry.slice(0, separatorIndex).trim();
+      const value = entry.slice(separatorIndex + 1).trim();
+      cookies[name] = decodeURIComponent(value);
+      return cookies;
+    }, {});
+}
+
+function getWebLoginKey(req) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0]?.trim();
+  return forwardedFor || req.socket?.remoteAddress || 'unknown';
+}
+
+function cleanupExpiredWebSessions(now = Date.now()) {
+  for (const [token, session] of webSessions.entries()) {
+    if (session.expiresAt <= now) {
+      webSessions.delete(token);
+    }
+  }
+}
+
+function getWebSession(req) {
+  cleanupExpiredWebSessions();
+
+  const token = parseCookies(req)[WEB_SESSION_COOKIE_NAME];
+  if (!token) return null;
+
+  const session = webSessions.get(token);
+  if (!session) return null;
+
+  if (session.expiresAt <= Date.now()) {
+    webSessions.delete(token);
+    return null;
+  }
+
+  return {
+    token,
+    ...session,
+  };
+}
+
+function createWebSession() {
+  cleanupExpiredWebSessions();
+
+  const maxAgeSeconds = config.webSessionTtlHours * 60 * 60;
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + maxAgeSeconds * 1000;
+
+  webSessions.set(token, { expiresAt });
+
+  return {
+    token,
+    maxAgeSeconds,
+  };
+}
+
+function cleanupExpiredWebLoginAttempts(now = Date.now()) {
+  const windowMs = config.webLoginWindowMinutes * 60 * 1000;
+
+  for (const [key, entry] of webLoginAttempts.entries()) {
+    if (entry.blockedUntil > now) continue;
+    if (now - entry.windowStartedAt < windowMs) continue;
+    webLoginAttempts.delete(key);
+  }
+}
+
+function getActiveWebLoginAttempt(req, now = Date.now()) {
+  if (config.webLoginMaxAttempts <= 0) {
+    return null;
+  }
+
+  cleanupExpiredWebLoginAttempts(now);
+
+  const key = getWebLoginKey(req);
+  const entry = webLoginAttempts.get(key);
+
+  if (!entry) return null;
+  if (entry.blockedUntil > now) return { key, ...entry };
+
+  const windowMs = config.webLoginWindowMinutes * 60 * 1000;
+  if (now - entry.windowStartedAt >= windowMs) {
+    webLoginAttempts.delete(key);
+    return null;
+  }
+
+  return { key, ...entry };
+}
+
+function clearWebLoginAttempts(req) {
+  if (config.webLoginMaxAttempts <= 0) {
+    return;
+  }
+
+  webLoginAttempts.delete(getWebLoginKey(req));
+}
+
+function registerFailedWebLogin(req, now = Date.now()) {
+  if (config.webLoginMaxAttempts <= 0) {
+    return null;
+  }
+
+  cleanupExpiredWebLoginAttempts(now);
+
+  const key = getWebLoginKey(req);
+  const windowMs = config.webLoginWindowMinutes * 60 * 1000;
+  const current = webLoginAttempts.get(key);
+  const expired = current && current.blockedUntil <= now && now - current.windowStartedAt >= windowMs;
+  const entry = !current || expired ? { count: 0, windowStartedAt: now, blockedUntil: 0 } : current;
+
+  entry.count += 1;
+
+  if (entry.count >= config.webLoginMaxAttempts) {
+    entry.blockedUntil = now + windowMs;
+  }
+
+  webLoginAttempts.set(key, entry);
+  return { key, ...entry };
+}
+
+function describeWebLoginBlockSeconds(entry, now = Date.now()) {
+  if (!entry?.blockedUntil || entry.blockedUntil <= now) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil((entry.blockedUntil - now) / 1000));
+}
+
+function serializeCookie(name, value, { maxAgeSeconds, expires, secure = false } = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+
+  if (typeof maxAgeSeconds === 'number') {
+    parts.push(`Max-Age=${maxAgeSeconds}`);
+  }
+
+  if (expires instanceof Date) {
+    parts.push(`Expires=${expires.toUTCString()}`);
+  }
+
+  if (secure) {
+    parts.push('Secure');
+  }
+
+  return parts.join('; ');
+}
+
+async function readFormBody(req, limitBytes = 16 * 1024) {
+  const chunks = [];
+  let total = 0;
+
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > limitBytes) {
+      throw new Error(`Request exceeds the maximum allowed size of ${limitBytes} bytes`);
+    }
+    chunks.push(chunk);
+  }
+
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+}
+
+function hasDocsAccess(req) {
+  if (!isWebLoginEnabled()) {
+    return true;
+  }
+
+  return Boolean(getWebSession(req));
+}
+
+function ensureDocsAccess(req, res, { requireWebLogin = false } = {}) {
+  if (requireWebLogin && !isWebLoginEnabled()) {
+    jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
+    return false;
+  }
+
+  if (hasDocsAccess(req)) {
+    return true;
+  }
+
+  jsonError(res, 401, 'Web docs login is required.');
+  return false;
+}
+
+async function handleWebLogin(req, res) {
+  if (!isWebLoginEnabled()) {
+    redirect(res, '/docs', {
+      'cache-control': 'no-store',
+    });
+    return;
+  }
+
+  const blockedAttempt = getActiveWebLoginAttempt(req);
+  if (blockedAttempt?.blockedUntil > Date.now()) {
+    const waitSeconds = describeWebLoginBlockSeconds(blockedAttempt);
+    html(
+      res,
+      429,
+      renderLoginPage({
+        errorMessage: `로그인 시도가 너무 많습니다. ${waitSeconds}초 후 다시 시도하세요.`,
+        loginPath: '/login',
+      }),
+      {
+        'cache-control': 'no-store',
+        vary: 'Cookie',
+      },
+    );
+    return;
+  }
+
+  try {
+    const form = await readFormBody(req);
+    const password = String(form.get('password') ?? '');
+
+    if (!verifyWebPassword(password, config)) {
+      const failedAttempt = registerFailedWebLogin(req);
+      const waitSeconds = describeWebLoginBlockSeconds(failedAttempt);
+
+      html(
+        res,
+        waitSeconds ? 429 : 401,
+        renderLoginPage({
+          errorMessage: waitSeconds
+            ? `로그인 시도가 너무 많습니다. ${waitSeconds}초 후 다시 시도하세요.`
+            : '비밀번호가 올바르지 않습니다.',
+          loginPath: '/login',
+        }),
+        {
+          'cache-control': 'no-store',
+          vary: 'Cookie',
+        },
+      );
+      return;
+    }
+
+    clearWebLoginAttempts(req);
+    const session = createWebSession();
+    redirect(res, '/docs', {
+      'cache-control': 'no-store',
+      'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, session.token, {
+        maxAgeSeconds: session.maxAgeSeconds,
+        secure: requestIsSecure(req),
+      }),
+    });
+  } catch (error) {
+    html(
+      res,
+      400,
+      renderLoginPage({
+        errorMessage: error.message || '로그인 요청을 처리하지 못했습니다.',
+        loginPath: '/login',
+      }),
+      {
+        'cache-control': 'no-store',
+        vary: 'Cookie',
+      },
+    );
+  }
+}
+
+function handleWebLogout(req, res) {
+  const session = getWebSession(req);
+  if (session) {
+    webSessions.delete(session.token);
+  }
+
+  redirect(res, '/docs', {
+    'cache-control': 'no-store',
+    'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, '', {
+      maxAgeSeconds: 0,
+      expires: new Date(0),
+      secure: requestIsSecure(req),
+    }),
+  });
+}
+
+async function handleClaudeAuthStatus(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  try {
+    const status = await claudeAuthManager.getStatus();
+    json(res, 200, {
+      ok: true,
+      status,
+    });
+  } catch (error) {
+    jsonError(res, 500, error.message || 'Failed to read Claude auth status.');
+  }
+}
+
+function handleClaudeAuthOperation(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    operation: claudeAuthManager.getOperation(),
+  });
+}
+
+async function handleClaudeAuthLogin(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req, 16 * 1024);
+    const provider = body?.provider === 'console' ? 'console' : 'claudeai';
+    const email = typeof body?.email === 'string' ? body.email.trim() : '';
+    const sso = Boolean(body?.sso);
+
+    const operation = claudeAuthManager.startLogin({
+      provider,
+      email,
+      sso,
+    });
+
+    json(res, 202, {
+      ok: true,
+      operation,
+    });
+  } catch (error) {
+    jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude login.', {
+      operation: error.operation || claudeAuthManager.getOperation(),
+    });
+  }
+}
+
+function handleClaudeAuthLogout(req, res) {
+  if (!ensureDocsAccess(req, res, { requireWebLogin: true })) {
+    return;
+  }
+
+  try {
+    const operation = claudeAuthManager.startLogout();
+    json(res, 202, {
+      ok: true,
+      operation,
+    });
+  } catch (error) {
+    jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude logout.', {
+      operation: error.operation || claudeAuthManager.getOperation(),
+    });
+  }
 }
 
 function applyProxyAuth(req, requestId) {
@@ -237,11 +714,85 @@ async function handleMessages(req, res) {
 
 function requestHandler(req, res) {
   if (req.method === 'GET' && req.url === '/') {
-    json(res, 200, {
-      ok: true,
-      service: 'claude-anthropic-proxy',
-      endpoints: ['/health', '/v1/messages', '/v1/models'],
+    const metadata = buildServiceMetadata();
+
+    if (prefersHtml(req)) {
+      redirect(res, '/docs', {
+        vary: 'Accept',
+        'cache-control': 'no-store',
+      });
+      return;
+    }
+
+    json(res, 200, metadata, {
+      vary: 'Accept',
     });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/docs') {
+    if (isWebLoginEnabled() && !getWebSession(req)) {
+      html(res, 200, renderLoginPage({ loginPath: '/login' }), {
+        vary: 'Cookie',
+        'cache-control': 'no-store',
+      });
+      return;
+    }
+
+    html(res, 200, renderHomePage(config), {
+      vary: 'Cookie',
+      'cache-control': 'no-store',
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/login') {
+    if (!isWebLoginEnabled() || getWebSession(req)) {
+      redirect(res, '/docs', {
+        'cache-control': 'no-store',
+      });
+      return;
+    }
+
+    html(res, 200, renderLoginPage({ loginPath: '/login' }), {
+      vary: 'Cookie',
+      'cache-control': 'no-store',
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/login') {
+    void handleWebLogin(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/logout') {
+    handleWebLogout(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api-info') {
+    json(res, 200, buildServiceMetadata());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/claude-auth/status') {
+    void handleClaudeAuthStatus(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/claude-auth/operation') {
+    handleClaudeAuthOperation(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/claude-auth/login') {
+    void handleClaudeAuthLogin(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/claude-auth/logout') {
+    handleClaudeAuthLogout(req, res);
     return;
   }
 
