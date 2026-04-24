@@ -8,6 +8,7 @@
 - 현재 kube-context 가 대상 클러스터를 가리킴
 - Claude CLI 로그인 정보가 로컬 `~/.claude` 에 존재
 - 이미지 기본값은 `ghcr.io/tkfka1/claude-proxy:1.1.0`
+- `main` push 가 성공하면 GHCR 에 `ghcr.io/tkfka1/claude-proxy:main` 도 자동 갱신됨
 
 ## 1) Claude auth Secret 생성
 
@@ -80,6 +81,15 @@ PROXY_ENV_SECRET=claude-proxy-env \
 ./deploy/k8s/deploy-helm.sh
 ```
 
+최신 `main` 브랜치 이미지를 바로 배포하려면:
+
+```bash
+IMAGE_TAG=main \
+CLAUDE_AUTH_SECRET=claude-auth \
+PROXY_ENV_SECRET=claude-proxy-env \
+./deploy/k8s/deploy-helm.sh
+```
+
 ## 배포 후 확인
 
 ```bash
@@ -97,3 +107,5 @@ curl http://127.0.0.1:8080/health
 ```bash
 IMAGE_TAG=1.1.0 ./deploy/k8s/deploy-helm.sh
 ```
+
+검증용 edge 배포는 `IMAGE_TAG=main` 또는 `IMAGE_TAG=sha-<7자리>` 로도 가능합니다.

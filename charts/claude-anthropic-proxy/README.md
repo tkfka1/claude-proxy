@@ -112,6 +112,9 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 
 > 주의: inline 방식은 shell history, CI logs, values 파일 관리에 각별히 주의해야 합니다.
 
+최신 `main` 브랜치 이미지를 바로 써보고 싶으면 `image.tag=main` 으로 override 하면 됩니다.
+커밋 고정 배포가 필요하면 `image.tag=sha-<7자리>` 도 사용할 수 있습니다.
+
 ## 주요 values
 
 - `image.repository`, `image.tag`

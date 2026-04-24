@@ -308,6 +308,7 @@ make pm2-restart
   - `npm pack --dry-run` 으로 npm 배포 산출물 검증
   - Helm lint / template 검증
   - `linux/amd64`, `linux/arm64` Docker 빌드 검증
+  - `main` push 가 성공하면 GHCR 멀티아키 이미지 `:main`, `:sha-<7자리>` 자동 push
 - `.github/workflows/release.yml`
   - `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
   - `NPM_TOKEN` 이 있을 때만 npm 패키지 publish
@@ -316,6 +317,9 @@ make pm2-restart
   - 선택적으로 Docker Hub도 같이 push
 
 ### 릴리즈 절차
+
+`main` push 는 edge 이미지 배포까지만 자동으로 합니다.
+공식 릴리즈(`:latest`, `vX.Y.Z`, GitHub Release, optional npm publish)는 아래처럼 태그 push 때만 만듭니다.
 
 1. `main` 에 머지
 2. `package.json` 버전 확인
@@ -350,6 +354,9 @@ git push origin main --tags
 기본 push 대상:
 
 - `ghcr.io/tkfka1/claude-proxy`
+  - `:main` , 최신 `main` 브랜치 성공 빌드
+  - `:sha-<7자리>` , 특정 커밋 고정용 edge 이미지
+  - `:latest`, `:1.1.0`, `:1.1`, `:sha-...` 는 공식 release 태그 push 때 생성
 
 선택 push 대상:
 
@@ -497,6 +504,16 @@ docker run --rm \
   --env-file .env \
   -v "$HOME/.claude:/home/node/.claude:ro" \
   ghcr.io/tkfka1/claude-proxy:latest
+```
+
+최신 `main` 브랜치 빌드를 바로 써보고 싶으면:
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  --env-file .env \
+  -v "$HOME/.claude:/home/node/.claude:ro" \
+  ghcr.io/tkfka1/claude-proxy:main
 ```
 
 ---
