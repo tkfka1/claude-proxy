@@ -7,7 +7,7 @@
 - `examples/external-secret.yaml`: External Secrets Operator 예시
 - `examples/sealed-secret.yaml`: Bitnami SealedSecret 예시
 - `examples/values-ingress-cert-manager.yaml`: Ingress + cert-manager values 예시
-- `examples/values-proxy-state-pvc.yaml`: `/docs` 에서 바꾼 x-api-key 를 PVC에 유지하는 예시
+- `examples/values-proxy-state-pvc.yaml`: 로컬 파일 기반 state를 PVC에 유지하는 fallback 예시
 - `examples/clusterissuer-letsencrypt.yaml`: cert-manager ClusterIssuer 예시
 - `../../deploy/k8s/*.sh`: 실제 클러스터 배포용 helper script
 
@@ -51,7 +51,7 @@ kubectl create secret generic claude-proxy-env \
 ```
 
 지금 기본 운영 흐름에서는 이 Secret이 **필수는 아닙니다**.
-차트에서 PVC를 붙여 `/docs` 에서 설정한 x-api-key 를 유지할 수 있으므로,
+차트가 내부 Redis를 같이 띄워 `/docs` 에서 설정한 x-api-key 와 최근 로그를 저장하므로,
 처음 부팅 후 `/docs` 에서 키를 저장하는 쪽이 기본 경로입니다.
 
 ## 설치
@@ -72,6 +72,18 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   --set claudeAuth.existingSecret=claude-auth
 ```
 
+외부 Redis를 쓰고 싶으면:
+
+```bash
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/values-prod.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set redis.enabled=false \
+  --set env.REDIS_URL=redis://redis.default.svc.cluster.local:6379/0
+```
+
 ## Ingress + cert-manager 예시
 
 ```bash
@@ -81,11 +93,12 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
-## x-api-key state PVC 예시
+## x-api-key state PVC fallback 예시
 
-`/docs` 에서 바꾼 x-api-key 와 최근 로그를 재시작 후에도 유지하려면 PVC를 붙여야 합니다.
+기본 `values-prod.yaml` 는 내부 Redis를 같이 띄워 상태를 보존합니다.
+Redis 대신 로컬 파일 + PVC fallback 모드가 필요할 때만 아래 예시를 씁니다.
 
-`values-prod.yaml` 자체가 이미 PVC 친화적인 single replica 시작점입니다.
+이 예시는 single replica 기준입니다.
 아래 예시는 기본값을 더 작은 values 파일로 켜는 예시입니다.
 
 기본 안전장치는 single replica 기준입니다.
@@ -154,6 +167,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `resources`
 - `podDisruptionBudget.*`
 - `env.*`
+- `redis.enabled`, `redis.persistence.*`
 - `proxyApiKey.value`
 - `proxyApiKey.existingSecret`
 - `proxyState.persistence.*`
@@ -172,8 +186,8 @@ env:
   CLAUDE_DEFAULT_MODEL: sonnet
   ENABLE_REQUEST_LOGGING: "false"
   ALLOW_MISSING_API_KEY_HEADER: "false"
-
-proxyState:
+redis:
+  enabled: true
   persistence:
     enabled: true
     size: 1Gi

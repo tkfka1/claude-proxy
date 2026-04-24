@@ -84,6 +84,8 @@ export function loadConfig() {
     proxyApiKey: process.env.PROXY_API_KEY || '',
     proxyStateFile: resolveProxyStateFile(),
     recentLogFile: resolveRecentLogFile(),
+    redisUrl: process.env.REDIS_URL || '',
+    redisKeyPrefix: process.env.REDIS_KEY_PREFIX || 'claude-anthropic-proxy',
     requireAnthropicVersion: parseBooleanEnv('REQUIRE_ANTHROPIC_VERSION', false),
     defaultAnthropicVersion: process.env.DEFAULT_ANTHROPIC_VERSION || '2023-06-01',
     allowMissingApiKeyHeader: parseBooleanEnv('ALLOW_MISSING_API_KEY_HEADER', true),

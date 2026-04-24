@@ -22,6 +22,7 @@ import { createClaudeAuthManager } from './claude-auth.js';
 import { createMessageConcurrencyManager } from './message-concurrency.js';
 import { createProxyApiKeyManager } from './proxy-api-key.js';
 import { createProxyStateFileStore, createRecentLogFileStore } from './proxy-state-file.js';
+import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { verifyWebPassword } from './web-auth.js';
@@ -32,14 +33,31 @@ const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
-const proxyStateFileStore = createProxyStateFileStore({ filePath: config.proxyStateFile });
-const recentLogFileStore = createRecentLogFileStore({ filePath: config.recentLogFile });
+const stateBackend = config.redisUrl
+  ? await createRedisStateStore({
+      url: config.redisUrl,
+      keyPrefix: config.redisKeyPrefix,
+    })
+  : null;
+const proxyStateFileStore = stateBackend ? stateBackend.createProxyApiKeyStore() : createProxyStateFileStore({ filePath: config.proxyStateFile });
+const recentLogFileStore = stateBackend ? stateBackend.createRecentLogStore() : createRecentLogFileStore({ filePath: config.recentLogFile });
+const initialRecentLogEntries = await recentLogFileStore.loadEntries();
+let initialProxyApiKeyState = await proxyStateFileStore.loadState();
+if (!initialProxyApiKeyState && config.proxyApiKey) {
+  initialProxyApiKeyState = {
+    proxyApiKey: config.proxyApiKey,
+    updatedAt: new Date().toISOString(),
+  };
+  await proxyStateFileStore.saveState(initialProxyApiKeyState);
+}
 const recentLogStore = createRecentLogStore({
   limit: config.recentLogLimit,
   storage: recentLogFileStore,
+  initialEntries: initialRecentLogEntries,
 });
 const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
+  loadedState: initialProxyApiKeyState,
   storage: proxyStateFileStore,
 });
 const messageConcurrencyManager = createMessageConcurrencyManager({
@@ -57,6 +75,7 @@ const messageConcurrencyManager = createMessageConcurrencyManager({
   },
 });
 config.proxyApiKey = proxyApiKeyManager.getApiKey();
+config.stateBackend = stateBackend ? 'redis' : 'file';
 
 function log(event, details = {}, level = 'info') {
   recentLogStore.add(level, event, details);
@@ -83,6 +102,7 @@ function buildServiceMetadata() {
     web_login_enabled: isWebLoginEnabled(),
     proxy_api_key_configured: buildProxyApiKeySettings().configured,
     logs_path: '/logs/recent',
+    state_backend: config.stateBackend,
     log_store: recentLogStore.getPublicStatus(),
     message_execution: messageConcurrencyManager.getStatus(),
     claude_auth_paths: {
@@ -581,9 +601,9 @@ async function handleProxyApiKeyUpdate(req, res) {
 
   try {
     const body = await readJsonBody(req, 16 * 1024);
-    const next = body?.reset || body?.generate
+    const next = await (body?.reset || body?.generate
       ? proxyApiKeyManager.generateNewApiKey()
-      : proxyApiKeyManager.setApiKey(body?.apiKey);
+      : proxyApiKeyManager.setApiKey(body?.apiKey));
 
     config.proxyApiKey = next.apiKey;
 
@@ -614,6 +634,7 @@ function handleRecentLogs(req, res) {
     ok: true,
     entries: recentLogStore.list(),
     logStore: recentLogStore.getStatus(),
+    stateBackend: config.stateBackend,
     messageExecution: messageConcurrencyManager.getStatus(),
   }, {
     'cache-control': 'no-store',
@@ -684,15 +705,6 @@ async function handleMessages(req, res) {
   const requestId = createRequestId();
   const abortController = new AbortController();
   let releaseExecutionSlot = null;
-
-  req.on('aborted', () => {
-    abortController.abort();
-  });
-  res.on('close', () => {
-    if (!res.writableEnded) {
-      abortController.abort();
-    }
-  });
 
   try {
     applyProxyAuth(req, requestId);
@@ -773,7 +785,7 @@ async function handleMessages(req, res) {
           });
         },
         onDone(result) {
-          if (abortController.signal.aborted || req.destroyed || res.destroyed) {
+          if (res.destroyed) {
             releaseExecutionSlot?.();
             releaseExecutionSlot = null;
             log('messages request aborted', {
@@ -819,7 +831,7 @@ async function handleMessages(req, res) {
         onError(error) {
           releaseExecutionSlot?.();
           releaseExecutionSlot = null;
-          if (abortController.signal.aborted || req.destroyed || res.destroyed) {
+          if (res.destroyed) {
             log('messages request aborted', {
               requestId,
               phase: 'stream',
@@ -878,7 +890,7 @@ async function handleMessages(req, res) {
   } catch (error) {
     releaseExecutionSlot?.();
     releaseExecutionSlot = null;
-    if (!(error instanceof ProxyError) && (abortController.signal.aborted || req.destroyed || res.destroyed)) {
+    if (!(error instanceof ProxyError) && res.destroyed) {
       log('messages request aborted', { requestId, error: error.message }, 'warn');
       return;
     }
@@ -1013,6 +1025,7 @@ function startServer() {
   log('server started', {
     host: config.host,
     port: config.port,
+    stateBackend: config.stateBackend,
     messageExecution: messageConcurrencyManager.getStatus(),
   });
   server.listen(config.port, config.host, () => {

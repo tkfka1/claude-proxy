@@ -170,6 +170,8 @@ curl -N http://localhost:8080/v1/messages \
 - `MAX_CONCURRENT_MESSAGE_REQUESTS`: 동시에 실행할 `/v1/messages` 개수(기본값 `4`, `0`이면 무제한)
 - `MAX_QUEUED_MESSAGE_REQUESTS`: 실행 슬롯을 기다릴 큐 길이(기본값 `16`)
 - `RECENT_LOG_LIMIT`: `/docs` 와 `/logs/recent` 에서 유지할 최근 로그 개수(기본값 `200`)
+- `REDIS_URL`: Redis backend 주소. 설정하면 x-api-key state / recent logs 가 Redis로 이동
+- `REDIS_KEY_PREFIX`: Redis key prefix (기본값 `claude-anthropic-proxy`)
 - `RECENT_LOG_FILE`: 최근 로그를 영속 저장할 파일 경로. 비우면 state 디렉터리의 `recent-log.json` 사용
 
 ### 웹 문서 로그인 설정
@@ -217,6 +219,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
 - 최근 로그도 state 파일에 저장되므로 재시작 후 다시 볼 수 있음
 - 최근 로그가 파일에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
+- `REDIS_URL` 이 있으면 x-api-key state 와 최근 로그를 로컬 파일 대신 Redis에 저장
 - 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
   - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
   - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`
@@ -231,6 +234,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 슬롯이 꽉 차면 큐에서 기다리고, 큐까지 다 차면 `429 rate_limit_error` 반환
 - 스트리밍 요청도 동일한 슬롯을 점유하므로 오래 걸리는 응답이 많으면 큐 대기가 늘어날 수 있음
 - 현재 상태는 `/docs` 의 최근 로그 패널 또는 `GET /logs/recent` 에서 확인 가능
+- 이 동시성 제한은 **현재 프로세스/Pod 기준**이며, Redis backend를 켜도 전역 분산 semaphore까지는 아직 하지 않음
 
 ### Claude CLI 웹 로그인
 
@@ -259,6 +263,8 @@ CLAUDE_EXTRA_ARGS_JSON=["--verbose"]
 
 - `PROXY_API_KEY`: 프록시 자체 API 키 초기 bootstrap 값. 첫 저장 전 기본값으로만 사용되고, 이후에는 저장된 state 값이 계속 사용됨
 - `PROXY_STATE_FILE`: `/docs` 에서 바꾼 x-api-key 를 영속 저장할 파일 경로. 비우면 기본 state 디렉터리 사용
+- `REDIS_URL`: x-api-key state / recent logs 용 Redis 주소
+- `REDIS_KEY_PREFIX`: Redis key namespace prefix
 - `ALLOW_MISSING_API_KEY_HEADER`: `x-api-key` 없는 요청 허용 여부
 - `REQUIRE_ANTHROPIC_VERSION`: `anthropic-version` 헤더 필수 여부
 - `DEFAULT_ANTHROPIC_VERSION`: 기본 버전 문자열
@@ -589,6 +595,8 @@ docker compose down
 - 호스트의 `${HOME}/.claude` 를 `/home/node/.claude` 에 read-only 마운트
 - named volume `claude-proxy-state` 를 `/home/node/.local/state/claude-anthropic-proxy` 에 마운트해서
   `/docs` 에서 바꾼 x-api-key 도 재시작 후 유지
+
+`REDIS_URL` 을 지정하면 이 named volume 대신 Redis backend를 써도 됩니다.
 
 따라서 compose 를 실행하는 사용자 계정에서 `claude auth login` 이 되어 있어야 합니다.
 

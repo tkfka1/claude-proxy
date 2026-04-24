@@ -58,3 +58,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-proxy-state" (include "claude-anthropic-proxy.fullname" .) }}
 {{- end }}
 {{- end }}
+
+{{- define "claude-anthropic-proxy.redisFullname" -}}
+{{- printf "%s-redis" (include "claude-anthropic-proxy.fullname" .) }}
+{{- end }}
+
+{{- define "claude-anthropic-proxy.redisPvcName" -}}
+{{- if .Values.redis.persistence.existingClaim }}
+{{- .Values.redis.persistence.existingClaim }}
+{{- else }}
+{{- printf "%s-data" (include "claude-anthropic-proxy.redisFullname" .) }}
+{{- end }}
+{{- end }}

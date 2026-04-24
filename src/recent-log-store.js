@@ -75,9 +75,10 @@ function sanitizeDetails(value, depth = 0, key = '') {
   return truncateText(value);
 }
 
-export function createRecentLogStore({ limit = 200, storage = null } = {}) {
+export function createRecentLogStore({ limit = 200, storage = null, initialEntries = [] } = {}) {
   let nextId = 1;
   const entries = [];
+  let pendingWrite = Promise.resolve();
   const persistence = {
     enabled: Boolean(storage),
     healthy: Boolean(storage),
@@ -85,15 +86,9 @@ export function createRecentLogStore({ limit = 200, storage = null } = {}) {
     lastSavedAt: null,
   };
 
-  if (storage) {
-    try {
-      const persistedEntries = storage.loadEntries();
-      entries.push(...persistedEntries);
-      nextId = persistedEntries.reduce((maxId, entry) => Math.max(maxId, entry.id || 0), 0) + 1;
-    } catch (error) {
-      persistence.healthy = false;
-      persistence.lastError = error.message;
-    }
+  if (Array.isArray(initialEntries) && initialEntries.length > 0) {
+    entries.push(...initialEntries);
+    nextId = initialEntries.reduce((maxId, entry) => Math.max(maxId, entry.id || 0), 0) + 1;
   }
 
   function trimToLimit() {
@@ -104,13 +99,13 @@ export function createRecentLogStore({ limit = 200, storage = null } = {}) {
     entries.splice(limit);
   }
 
-  function persistEntries() {
+  async function persistEntries() {
     if (!storage) {
       return;
     }
 
     try {
-      storage.saveEntries(entries);
+      await storage.saveEntries(entries);
       persistence.healthy = true;
       persistence.lastError = null;
       persistence.lastSavedAt = new Date().toISOString();
@@ -130,7 +125,7 @@ export function createRecentLogStore({ limit = 200, storage = null } = {}) {
         details: sanitizeDetails(details),
       });
       trimToLimit();
-      persistEntries();
+      pendingWrite = pendingWrite.then(() => persistEntries());
     },
     list(maxEntries = limit) {
       return entries.slice(0, Math.max(0, maxEntries));
@@ -154,16 +149,20 @@ export function createRecentLogStore({ limit = 200, storage = null } = {}) {
       entries.length = 0;
       nextId = 1;
       if (storage) {
-        try {
-          storage.clearEntries();
-          persistence.healthy = true;
-          persistence.lastError = null;
-          persistence.lastSavedAt = new Date().toISOString();
-        } catch (error) {
-          persistence.healthy = false;
-          persistence.lastError = error.message;
-        }
+        pendingWrite = pendingWrite.then(() => Promise.resolve(storage.clearEntries())
+          .then(() => {
+            persistence.healthy = true;
+            persistence.lastError = null;
+            persistence.lastSavedAt = new Date().toISOString();
+          })
+          .catch((error) => {
+            persistence.healthy = false;
+            persistence.lastError = error.message;
+          }));
       }
+    },
+    async flush() {
+      await pendingWrite.catch(() => {});
     },
   };
 }

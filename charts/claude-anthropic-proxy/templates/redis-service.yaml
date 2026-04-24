@@ -1,0 +1,19 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "claude-anthropic-proxy.redisFullname" . }}
+  labels:
+    {{- include "claude-anthropic-proxy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "claude-anthropic-proxy.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+{{- end }}

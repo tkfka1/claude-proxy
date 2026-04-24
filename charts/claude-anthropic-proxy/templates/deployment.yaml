@@ -53,6 +53,14 @@ spec:
             - name: {{ $name }}
               value: {{ printf "%v" $value | quote }}
             {{- end }}
+            {{- if and .Values.redis.enabled (not (hasKey .Values.env "REDIS_URL")) }}
+            - name: REDIS_URL
+              value: {{ printf "redis://%s:%v/0" (include "claude-anthropic-proxy.redisFullname" .) .Values.redis.service.port | quote }}
+            {{- end }}
+            {{- if and .Values.redis.enabled (not (hasKey .Values.env "REDIS_KEY_PREFIX")) }}
+            - name: REDIS_KEY_PREFIX
+              value: {{ include "claude-anthropic-proxy.fullname" . | quote }}
+            {{- end }}
             {{- if .Values.proxyState.persistence.enabled }}
             - name: PROXY_STATE_FILE
               value: {{ printf "%s/%s" .Values.proxyState.mountPath .Values.proxyState.fileName | quote }}

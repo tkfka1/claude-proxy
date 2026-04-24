@@ -45,6 +45,11 @@ env:
 
 proxyState:
   persistence:
+    enabled: false
+
+redis:
+  enabled: true
+  persistence:
     enabled: true
     size: 1Gi
 

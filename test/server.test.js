@@ -85,6 +85,7 @@ async function waitForClaudeAuthOperation(baseUrl, cookie, expectedStatus) {
 }
 
 test.after(async () => {
+  await recentLogStore.flush();
   if (server.listening) {
     server.close();
     await once(server, 'close');
@@ -95,13 +96,13 @@ test.after(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetMockClaudeAuthState();
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
   delete process.env.MOCK_CLAUDE_DELAY_MS;
   delete process.env.MOCK_CLAUDE_STREAM_DELAY_MS;
   config.proxyApiKey = '';
-  proxyApiKeyManager.resetApiKey('');
+  await proxyApiKeyManager.resetApiKey('');
   config.allowMissingApiKeyHeader = true;
   messageConcurrencyManager.clearQueue();
   messageConcurrencyManager.configure({
@@ -109,6 +110,7 @@ test.beforeEach(() => {
     maxQueued: config.maxQueuedMessageRequests,
   });
   recentLogStore.clear();
+  await recentLogStore.flush();
 });
 
 test('GET / redirects browser clients to /docs', async () => {

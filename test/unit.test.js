@@ -89,7 +89,7 @@ test('validateWebPasswordSettings requires a docs password or hash', () => {
   );
 });
 
-test('proxy api key helpers validate, mask, and update runtime state', () => {
+test('proxy api key helpers validate, mask, and update runtime state', async () => {
   assert.throws(() => validateProxyApiKeyInput('short'), /at least 8 characters/);
   assert.equal(maskProxyApiKey('runtime-secret-key'), 'runt…ey');
 
@@ -100,12 +100,12 @@ test('proxy api key helpers validate, mask, and update runtime state', () => {
     updatedAt: null,
   });
 
-  const updated = manager.setApiKey('runtime-secret-key');
+  const updated = await manager.setApiKey('runtime-secret-key');
   assert.equal(updated.apiKey, 'runtime-secret-key');
   assert.equal(updated.configured, true);
   assert.equal(updated.maskedApiKey, 'runt…ey');
 
-  manager.resetApiKey('');
+  await manager.resetApiKey('');
   assert.equal(manager.getStatus().configured, false);
 });
 
@@ -132,7 +132,7 @@ test('proxy state file store saves and loads persisted x-api-key state', () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('proxy api key manager bootstraps from env once and then keeps persisted state', () => {
+test('proxy api key manager bootstraps from env once and then keeps persisted state', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-manager-'));
   const store = createProxyStateFileStore({
     filePath: path.join(tempDir, 'runtime-state.json'),
@@ -143,12 +143,14 @@ test('proxy api key manager bootstraps from env once and then keeps persisted st
     storage: store,
   });
   assert.equal(firstManager.getApiKey(), 'bootstrap-env-key');
-  assert.equal(store.loadState().proxyApiKey, 'bootstrap-env-key');
+  assert.equal(store.loadState(), null);
 
-  firstManager.setApiKey('persisted-secret-key');
+  await firstManager.setApiKey('persisted-secret-key');
+  const loadedState = store.loadState();
 
   const secondManager = createProxyApiKeyManager({
     initialApiKey: 'bootstrap-env-key',
+    loadedState,
     storage: store,
   });
 
@@ -157,6 +159,7 @@ test('proxy api key manager bootstraps from env once and then keeps persisted st
 
   const rotatedManager = createProxyApiKeyManager({
     initialApiKey: 'emergency-env-rotation',
+    loadedState,
     storage: store,
   });
 
@@ -176,25 +179,18 @@ test('resolveRecentLogFile uses explicit env path when provided', () => {
   assert.match(resolved, /tmp[\\/]+recent-log\.json$/);
 });
 
-test('proxy api key manager refuses a corrupt persisted state file even when env bootstrap exists', () => {
+test('proxy state file store rejects a corrupt persisted state file', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-corrupt-'));
   const filePath = path.join(tempDir, 'runtime-state.json');
   fs.writeFileSync(filePath, '{"proxyApiKey": ', 'utf8');
 
   const store = createProxyStateFileStore({ filePath });
-  assert.throws(
-    () =>
-      createProxyApiKeyManager({
-        initialApiKey: 'bootstrap-env-key',
-        storage: store,
-      }),
-    /Failed to load persisted proxy API key state/,
-  );
+  assert.throws(() => store.loadState(), /Unexpected end of JSON input/);
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('recent log store persists and reloads entries', () => {
+test('recent log store persists and reloads entries', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-logs-'));
   const storage = createRecentLogFileStore({
     filePath: path.join(tempDir, 'recent-log.json'),
@@ -206,10 +202,12 @@ test('recent log store persists and reloads entries', () => {
   });
   store.add('info', 'messages request', { requestId: 'req_1' });
   store.add('warn', 'messages request aborted', { requestId: 'req_2' });
+  await store.flush();
 
   const reloaded = createRecentLogStore({
     limit: 5,
     storage,
+    initialEntries: storage.loadEntries(),
   });
   const entries = reloaded.list();
   assert.equal(entries.length, 2);
@@ -221,7 +219,7 @@ test('recent log store persists and reloads entries', () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('recent log store redacts sensitive fields before persistence', () => {
+test('recent log store redacts sensitive fields before persistence', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-logs-redact-'));
   const storage = createRecentLogFileStore({
     filePath: path.join(tempDir, 'recent-log.json'),
@@ -235,6 +233,7 @@ test('recent log store redacts sensitive fields before persistence', () => {
     client: '203.0.113.10',
     email: 'user@example.com',
   });
+  await store.flush();
 
   const [entry] = storage.loadEntries();
   assert.equal(entry.details.client, '203.0.113.x');

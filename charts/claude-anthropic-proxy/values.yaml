@@ -33,6 +33,24 @@ proxyState:
     size: 1Gi
     annotations: {}
 
+redis:
+  enabled: false
+  image:
+    repository: redis
+    tag: "7.4-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379
+  persistence:
+    enabled: true
+    existingClaim: ""
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+  resources: {}
+
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: false
@@ -88,6 +106,7 @@ env:
   MAX_CONCURRENT_MESSAGE_REQUESTS: "4"
   MAX_QUEUED_MESSAGE_REQUESTS: "16"
   RECENT_LOG_LIMIT: "200"
+  REDIS_KEY_PREFIX: "claude-anthropic-proxy"
   CLAUDE_BIN: claude
   CLAUDE_DEFAULT_MODEL: sonnet
   CLAUDE_MODEL_MAP_JSON: ""

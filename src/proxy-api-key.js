@@ -39,39 +39,27 @@ export function generateProxyApiKey() {
   return crypto.randomBytes(GENERATED_KEY_BYTES).toString('base64url');
 }
 
-export function createProxyApiKeyManager({ initialApiKey = '', storage = null } = {}) {
+export function createProxyApiKeyManager({ initialApiKey = '', loadedState = null, storage = null } = {}) {
   const bootstrapApiKey = String(initialApiKey || '').trim();
   let currentApiKey = bootstrapApiKey;
   let updatedAt = currentApiKey ? new Date().toISOString() : null;
 
-  if (storage) {
-    try {
-      const persistedState = storage.loadState();
-      if (persistedState?.proxyApiKey) {
-        currentApiKey = persistedState.proxyApiKey;
-        updatedAt = persistedState.updatedAt || updatedAt || new Date().toISOString();
-      } else if (bootstrapApiKey) {
-        storage.saveState({
-          proxyApiKey: bootstrapApiKey,
-          updatedAt,
-        });
-      }
-    } catch (error) {
-      throw createProxyApiKeyError(`Failed to load persisted proxy API key state: ${error.message}`);
-    }
+  if (loadedState?.proxyApiKey) {
+    currentApiKey = loadedState.proxyApiKey;
+    updatedAt = loadedState.updatedAt || updatedAt || new Date().toISOString();
   }
 
-  function persistState(nextApiKey, nextUpdatedAt) {
+  async function persistState(nextApiKey, nextUpdatedAt) {
     if (!storage) {
       return;
     }
 
     if (!nextApiKey) {
-      storage.clearState();
+      await storage.clearState();
       return;
     }
 
-    storage.saveState({
+    await storage.saveState({
       proxyApiKey: nextApiKey,
       updatedAt: nextUpdatedAt,
     });
@@ -85,10 +73,10 @@ export function createProxyApiKeyManager({ initialApiKey = '', storage = null } 
     };
   }
 
-  function setApiKey(apiKey) {
+  async function setApiKey(apiKey) {
     const nextApiKey = validateProxyApiKeyInput(apiKey);
     const nextUpdatedAt = new Date().toISOString();
-    persistState(nextApiKey, nextUpdatedAt);
+    await persistState(nextApiKey, nextUpdatedAt);
     currentApiKey = nextApiKey;
     updatedAt = nextUpdatedAt;
 
@@ -98,7 +86,7 @@ export function createProxyApiKeyManager({ initialApiKey = '', storage = null } 
     };
   }
 
-  function generateNewApiKey() {
+  async function generateNewApiKey() {
     return setApiKey(generateProxyApiKey());
   }
 
@@ -107,10 +95,10 @@ export function createProxyApiKeyManager({ initialApiKey = '', storage = null } 
       return currentApiKey;
     },
     getStatus,
-    resetApiKey(apiKey = '') {
+    async resetApiKey(apiKey = '') {
       const nextApiKey = String(apiKey || '').trim();
       const nextUpdatedAt = nextApiKey ? new Date().toISOString() : null;
-      persistState(nextApiKey, nextUpdatedAt);
+      await persistState(nextApiKey, nextUpdatedAt);
       currentApiKey = nextApiKey;
       updatedAt = nextUpdatedAt;
       return {

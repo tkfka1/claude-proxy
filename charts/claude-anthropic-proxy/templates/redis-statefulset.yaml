@@ -1,0 +1,60 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "claude-anthropic-proxy.redisFullname" . }}
+  labels:
+    {{- include "claude-anthropic-proxy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ include "claude-anthropic-proxy.redisFullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "claude-anthropic-proxy.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "claude-anthropic-proxy.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.service.port }}
+              protocol: TCP
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --save
+            - "60"
+            - "1"
+            - --dir
+            - /data
+          livenessProbe:
+            tcpSocket:
+              port: redis
+          readinessProbe:
+            tcpSocket:
+              port: redis
+          {{- with .Values.redis.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          {{- if .Values.redis.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "claude-anthropic-proxy.redisPvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}
