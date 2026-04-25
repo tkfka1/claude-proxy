@@ -1395,7 +1395,11 @@ async function handleMessages(req, res) {
       return;
     }
     sendProxyError(res, error, requestId);
-    log('messages request failed', { requestId, error: error.message }, 'error');
+    log(
+      'messages request failed',
+      { requestId, error: error.message },
+      error instanceof ProxyError && error.status < 500 ? 'warn' : 'error',
+    );
   } finally {
     if (!streamCleanupDeferred) {
       finishMessageController();

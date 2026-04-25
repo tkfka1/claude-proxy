@@ -675,6 +675,17 @@ test('POST /proxy-api-key reset rotates the runtime key with previous-key grace'
   const invalidKeyBody = await invalidKeyResponse.json();
   assert.equal(invalidKeyBody.error.message, 'Invalid API key');
 
+  const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const logsBody = await logsResponse.json();
+  const invalidKeyLog = logsBody.entries.find(
+    (entry) => entry.event === 'messages request failed' && entry.details?.error === 'Invalid API key',
+  );
+  assert.equal(invalidKeyLog?.level, 'warn');
+
   const metricsResponse = await fetch(`${baseUrl}/metrics`);
   const metricsBody = await metricsResponse.json();
   assert.ok(metricsBody.proxyApiKey.previousKeyMatches >= 1);
