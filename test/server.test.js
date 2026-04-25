@@ -587,7 +587,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
   });
   assert.equal(wrongCurrentResponse.status, 401);
 
-  const shortPasswordResponse = await fetch(`${baseUrl}/web-password`, {
+  const emptyPasswordResponse = await fetch(`${baseUrl}/web-password`, {
     method: 'POST',
     headers: {
       cookie,
@@ -595,10 +595,10 @@ test('POST /web-password changes docs password and invalidates the current sessi
     },
     body: JSON.stringify({
       currentPassword: 'docs-secret',
-      newPassword: 'too-short',
+      newPassword: '',
     }),
   });
-  assert.equal(shortPasswordResponse.status, 400);
+  assert.equal(emptyPasswordResponse.status, 400);
 
   const updateResponse = await fetch(`${baseUrl}/web-password`, {
     method: 'POST',
@@ -608,7 +608,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
     },
     body: JSON.stringify({
       currentPassword: 'docs-secret',
-      newPassword: 'docs-secret-updated-123',
+      newPassword: '1234',
     }),
   });
 
@@ -637,7 +637,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
   });
   assert.equal(oldPasswordResponse.status, 401);
 
-  const newCookie = await loginDocs(baseUrl, 'docs-secret-updated-123');
+  const newCookie = await loginDocs(baseUrl, '1234');
   const newStatusResponse = await fetch(`${baseUrl}/web-password`, {
     headers: {
       cookie: newCookie,

@@ -925,11 +925,11 @@ export function renderHomePage(config) {
             </label>
             <label>
               새 비밀번호
-              <input id="web-password-next" type="password" autocomplete="new-password" minlength="12" placeholder="12자 이상" required />
+              <input id="web-password-next" type="password" autocomplete="new-password" placeholder="새 비밀번호" required />
             </label>
             <label>
               새 비밀번호 확인
-              <input id="web-password-confirm" type="password" autocomplete="new-password" minlength="12" required />
+              <input id="web-password-confirm" type="password" autocomplete="new-password" required />
             </label>
             <button id="web-password-submit" type="submit">비밀번호 변경</button>
           </form>

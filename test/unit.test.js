@@ -226,12 +226,11 @@ test('validateWebPasswordSettings requires a docs password or hash', () => {
   );
 });
 
-test('validateNewWebPassword rejects weak or placeholder runtime passwords', () => {
-  assert.throws(() => validateNewWebPassword('too-short'), /at least 12 characters/);
-  assert.throws(
-    () => validateNewWebPassword('replace-with-strong-docs-password'),
-    /must not be a placeholder/,
-  );
+test('validateNewWebPassword accepts simple runtime passwords and rejects empty values', () => {
+  assert.throws(() => validateNewWebPassword(''), /required/);
+  assert.equal(validateNewWebPassword('1234'), '1234');
+  assert.equal(validateNewWebPassword('password'), 'password');
+  assert.equal(validateNewWebPassword('replace-with-strong-docs-password'), 'replace-with-strong-docs-password');
   assert.equal(validateNewWebPassword('new-docs-secret-123'), 'new-docs-secret-123');
 });
 

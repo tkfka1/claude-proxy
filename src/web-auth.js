@@ -91,12 +91,8 @@ export function validateWebPasswordSettings({ webPassword, webPasswordHash }) {
 export function validateNewWebPassword(password) {
   const value = String(password || '');
 
-  if (value.length < 12) {
-    throw new Error('New password must be at least 12 characters.');
-  }
-
-  if (looksLikePlaceholderPassword(value)) {
-    throw new Error('New password must not be a placeholder.');
+  if (!value) {
+    throw new Error('New password is required.');
   }
 
   return value;
