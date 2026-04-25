@@ -46,9 +46,6 @@ jobs:
         env:
           REDIS_INTEGRATION_URL: redis://127.0.0.1:6379/0
 
-      - name: Verify npm package contents
-        run: npm run pack:dry-run
-
   helm:
     name: Helm chart
     runs-on: ubuntu-latest

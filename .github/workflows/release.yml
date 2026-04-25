@@ -23,7 +23,6 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Check out repository
@@ -48,7 +47,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
 
       - name: Validate release version
         id: version
@@ -77,31 +75,6 @@ jobs:
 
       - name: Run tests
         run: npm test
-
-      - name: Verify npm package contents
-        run: npm run pack:dry-run
-
-      - name: Check npm publish status
-        id: npm_status
-        shell: bash
-        run: |
-          set -euo pipefail
-          if npm view "${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.version }}" version >/dev/null 2>&1; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.version }} is already published to npm."
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish package to npm with NPM_TOKEN
-        if: ${{ steps.npm_status.outputs.published != 'true' && env.NPM_TOKEN != '' }}
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
-
-      - name: Publish package to npm with trusted publishing
-        if: ${{ steps.npm_status.outputs.published != 'true' && env.NPM_TOKEN == '' }}
-        run: npm publish --provenance
 
       - name: Decide container registries
         id: registries

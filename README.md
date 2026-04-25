@@ -71,7 +71,7 @@ cp .env.example .env
 전역 커맨드로 쓰려면:
 
 ```bash
-npm install -g claude-anthropic-proxy
+npm install -g git+https://github.com/tkfka1/claude-proxy.git
 claude-anthropic-proxy
 ```
 
@@ -394,7 +394,6 @@ make pm2-restart
 
 - `.github/workflows/ci.yml`
   - Node 20 / 22 / 24 테스트
-  - `npm pack --dry-run` 으로 npm 배포 산출물 검증
   - Helm lint / template 검증
   - `linux/amd64`, `linux/arm64` Docker 빌드 검증
   - `main` push 가 성공하면 GHCR 멀티아키 이미지 `:main`, `:sha-<7자리>` 자동 push
@@ -402,12 +401,10 @@ make pm2-restart
   - `main` CI 성공 후 `package.json` / `package-lock.json` 버전을 자동 bump
   - 자동으로 `vX.Y.Z` 태그와 GitHub Release 생성
   - GHCR 멀티아키 이미지 `:latest`, `:X.Y.Z`, `:X.Y`, `:sha-<7자리>` push
-  - `NPM_TOKEN` 이 있으면 npm publish, 없으면 npm publish만 skip
   - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` 이 있으면 Docker Hub도 같이 push
 - `.github/workflows/release.yml`
   - 수동 fallback: `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
-  - 이미 생성된 태그도 `workflow_dispatch` 의 `tag` 입력으로 다시 publish 가능
-  - `NPM_TOKEN` 이 있으면 token 기반 npm publish, 없으면 npm trusted publishing(OIDC) 시도
+  - 이미 생성된 태그도 `workflow_dispatch` 의 `tag` 입력으로 다시 릴리즈 가능
   - GitHub Release 생성
   - GHCR 멀티아키 이미지(`linux/amd64`, `linux/arm64`) push
   - 선택적으로 Docker Hub도 같이 push
@@ -419,7 +416,7 @@ make pm2-restart
 1. PR을 `main` 에 merge
 2. CI가 통과
 3. `auto-release.yml` 이 버전을 자동 bump하고 `vX.Y.Z` 태그 생성
-4. GitHub Release, GHCR release image, optional npm publish 실행
+4. GitHub Release와 GHCR release image 생성
 
 버전 bump 규칙:
 
@@ -429,32 +426,17 @@ make pm2-restart
 - 그 외는 patch
 
 수동 태그 릴리즈도 fallback으로 남겨 두었습니다. 직접 태그를 push하면 `release.yml` 이 실행됩니다.
-이미 태그가 만들어진 뒤 npm publish 인증만 보강한 경우에는 `release.yml` 을 수동 실행하고
-`tag` 에 예를 들어 `v2.0.0` 을 입력하면 같은 태그를 다시 검증한 뒤 npm/GitHub Release/컨테이너 publish를 재시도합니다.
+이미 태그가 만들어진 뒤 컨테이너 이미지나 GitHub Release를 다시 생성해야 하는 경우에는
+`release.yml` 을 수동 실행하고 `tag` 에 예를 들어 `v2.0.0` 을 입력하면 같은 태그를 다시 검증한 뒤
+GitHub Release/컨테이너 publish를 재시도합니다.
 
-### npm publish 인증
+### npm publish 정책
 
-기본 자동 릴리즈 경로(`auto-release.yml`)는 **npm optional** 입니다.
+이 저장소는 npm registry로 publish하지 않습니다.
 
-- `NPM_TOKEN` secret 이 있으면 auto release workflow 에서 npm publish 수행
-- `NPM_TOKEN` 이 없으면 auto release 는 npm publish 를 skip 하고, GitHub Release + 컨테이너 릴리즈만 진행
-
-수동 fallback(`release.yml`)은 npm publish 를 더 강하게 검증합니다.
-
-- 대상 버전이 이미 npm에 있으면 npm publish 를 건너뜀
-- `NPM_TOKEN` secret 이 있으면 token 기반 publish 사용
-- `NPM_TOKEN` 이 없으면 npm trusted publishing(OIDC) 으로 publish 시도
-
-Trusted publishing 을 쓰려면 npm에 trusted publisher를 설정해야 합니다.
-
-- package: `claude-anthropic-proxy`
-- GitHub owner/repo: `tkfka1/claude-proxy`
-- workflow filename: `release.yml`
-- `package.json` 의 `repository.url` 이 GitHub 저장소와 정확히 일치해야 함
-
-토큰 방식 fallback 도 지원합니다.
-
-- `NPM_TOKEN` GitHub Actions secret 추가 시 token 기반 publish 사용
+- 공개 배포는 GitHub 저장소, GitHub Release, GHCR 컨테이너 이미지를 기준으로 합니다.
+- Node 전역 커맨드는 Git URL 설치(`npm install -g git+https://github.com/tkfka1/claude-proxy.git`)를 사용합니다.
+- GitHub Actions 릴리즈 workflow도 npm publish 단계를 실행하지 않습니다.
 
 ### 컨테이너 이미지
 
@@ -821,3 +803,13 @@ npm test
 - 미지원 `tools` 요청 차단
 - 프롬프트 변환, system prompt 정규화, stop sequence 처리
 - 웹 비밀번호 scrypt hash 생성/검증
+
+---
+
+## 라이선스
+
+이 패키지는 `PolyForm-Noncommercial-1.0.0` 라이선스로 배포됩니다.
+
+- 비상업적 사용은 허용됩니다.
+- 상업적 사용은 허용되지 않습니다.
+- 전체 조건은 [`LICENSE`](./LICENSE)를 확인하세요.

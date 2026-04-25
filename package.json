@@ -5,16 +5,16 @@
   "type": "module",
   "main": "src/server.js",
   "bin": {
-    "claude-anthropic-proxy": "./bin/claude-anthropic-proxy.js"
+    "claude-anthropic-proxy": "bin/claude-anthropic-proxy.js"
   },
   "files": [
     "bin",
     "src",
     ".env.example",
+    "LICENSE",
     "README.md"
   ],
   "scripts": {
-    "pack:dry-run": "npm pack --dry-run",
     "start": "node src/server.js",
     "start:bin": "claude-anthropic-proxy",
     "test": "node --test test/*.test.js"
@@ -34,14 +34,12 @@
     "url": "https://github.com/tkfka1/claude-proxy/issues"
   },
   "homepage": "https://github.com/tkfka1/claude-proxy#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "redis": "^5.12.1"
-  }
+  },
+  "license": "PolyForm-Noncommercial-1.0.0"
 }
