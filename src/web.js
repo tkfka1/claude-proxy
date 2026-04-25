@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import crypto from 'node:crypto';
 
 export const serviceMetadata = {
   ok: true,
@@ -17,6 +18,13 @@ export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
   <path d="M17 48h30" stroke="#c8f56d" stroke-width="3" stroke-linecap="round" opacity=".9"/>
 </svg>
 `;
+
+const faviconVersion = crypto
+  .createHash('sha256')
+  .update(faviconIco)
+  .update(faviconSvg)
+  .digest('hex')
+  .slice(0, 12);
 
 function escapeHtml(value) {
   return String(value)
@@ -38,8 +46,8 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#070806" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" href="/favicon.svg?v=${faviconVersion}" type="image/svg+xml" />
+    <link rel="shortcut icon" href="/favicon.ico?v=${faviconVersion}" />
     <title>${escapeHtml(title)}</title>
     <style>
       :root {

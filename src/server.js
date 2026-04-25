@@ -1624,13 +1624,14 @@ async function handleMessages(req, res) {
 
 function requestHandler(req, res) {
   recordRequest(req, res);
+  const pathname = requestPathname(req);
 
-  if (req.method === 'GET' && req.url === '/favicon.svg') {
+  if (req.method === 'GET' && pathname === '/favicon.svg') {
     svg(res, 200, faviconSvg);
     return;
   }
 
-  if (req.method === 'GET' && req.url === '/favicon.ico') {
+  if (req.method === 'GET' && pathname === '/favicon.ico') {
     binary(res, 200, faviconIco, 'image/x-icon');
     return;
   }

@@ -190,8 +190,8 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.doesNotMatch(body, /WEB_PASSWORD/);
   assert.doesNotMatch(body, /WEB_PASSWORD_HASH/);
   assert.doesNotMatch(body, /들어가면 보이는 것/);
-  assert.match(body, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml" \/>/);
-  assert.match(body, /<link rel="shortcut icon" href="\/favicon\.ico" \/>/);
+  assert.match(body, /<link rel="icon" href="\/favicon\.svg\?v=[a-f0-9]{12}" type="image\/svg\+xml" \/>/);
+  assert.match(body, /<link rel="shortcut icon" href="\/favicon\.ico\?v=[a-f0-9]{12}" \/>/);
 });
 
 test('GET /favicon serves the Claude Proxy icon without polluting recent logs', async () => {
@@ -210,6 +210,10 @@ test('GET /favicon serves the Claude Proxy icon without polluting recent logs', 
   assert.match(icoResponse.headers.get('content-type') || '', /^image\/x-icon\b/);
   const icoMagic = Buffer.from(await icoResponse.arrayBuffer()).subarray(0, 4);
   assert.deepEqual([...icoMagic], [0, 0, 1, 0]);
+
+  const versionedIcoResponse = await fetch(`${baseUrl}/favicon.ico?v=test-cache-bust`);
+  assert.equal(versionedIcoResponse.status, 200);
+  assert.match(versionedIcoResponse.headers.get('content-type') || '', /^image\/x-icon\b/);
 
   const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
     headers: {
