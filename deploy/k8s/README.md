@@ -93,6 +93,16 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
+### IDC HTTP ingress
+
+앞단 Load Balancer가 `http://claude-proxy.idc.hkyo.kr/` 를 ingress controller로 전달하는 배포에서는
+TLS/cert-manager 없이 HTTP ingress values만 추가합니다.
+
+```bash
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http.yaml \
+./deploy/k8s/deploy-helm.sh
+```
+
 ### 기본 운영 동작
 
 `values-prod.yaml` 는 내부 Redis를 같이 올리는 운영 시작점입니다.

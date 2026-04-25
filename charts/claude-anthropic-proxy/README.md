@@ -7,6 +7,7 @@
 - `examples/external-secret.yaml`: External Secrets Operator 예시
 - `examples/sealed-secret.yaml`: Bitnami SealedSecret 예시
 - `examples/values-ingress-cert-manager.yaml`: Ingress + cert-manager values 예시
+- `examples/values-ingress-idc-http.yaml`: `claude-proxy.idc.hkyo.kr` HTTP ingress values 예시
 - `examples/values-proxy-state-pvc.yaml`: legacy local-file fallback 예시(운영 기본은 Redis)
 - `examples/clusterissuer-letsencrypt.yaml`: cert-manager ClusterIssuer 예시
 - `../../deploy/k8s/*.sh`: 실제 클러스터 배포용 helper script
@@ -121,6 +122,16 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 kubectl apply -f charts/claude-anthropic-proxy/examples/clusterissuer-letsencrypt.yaml
 
 EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml \
+./deploy/k8s/deploy-helm.sh
+```
+
+## IDC HTTP Ingress 예시
+
+앞단 Load Balancer가 `http://claude-proxy.idc.hkyo.kr/` 를 ingress controller로 전달하는 구성입니다.
+TLS/cert-manager는 켜지지 않고, service는 기존 `ClusterIP` 그대로 둡니다.
+
+```bash
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http.yaml \
 ./deploy/k8s/deploy-helm.sh
 ```
 

@@ -1,0 +1,13 @@
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+  hosts:
+    - host: claude-proxy.idc.hkyo.kr
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

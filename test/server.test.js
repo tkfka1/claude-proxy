@@ -220,6 +220,9 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /x-api-key 저장/);
   assert.match(body, /리셋/);
   assert.match(body, /\/proxy-api-key/);
+  assert.match(body, /로그 검색/);
+  assert.match(body, /JSON 저장/);
+  assert.match(body, /로그 비우기/);
 });
 
 test('POST /login rejects an invalid password', async () => {
@@ -605,6 +608,51 @@ test('GET /logs/recent returns recent entries and concurrency status for docs-au
   assert.equal(body.logStore.healthy, true);
   assert.ok(Array.isArray(body.entries));
   assert.ok(body.entries.some((entry) => entry.event === 'messages request completed'));
+  assert.ok(
+    body.entries.some(
+      (entry) => entry.event === 'http request completed'
+        && entry.details?.method === 'POST'
+        && entry.details?.path === '/v1/messages'
+        && entry.details?.statusCode === 200
+        && Number.isInteger(entry.details?.durationMs),
+    ),
+  );
+});
+
+test('DELETE /logs/recent clears recent logs after docs authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const unauthenticatedResponse = await fetch(`${baseUrl}/logs/recent`, {
+    method: 'DELETE',
+  });
+
+  assert.equal(unauthenticatedResponse.status, 401);
+
+  await fetch(`${baseUrl}/api-info`);
+  const cookie = await loginDocs(baseUrl);
+
+  const beforeResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const beforeBody = await beforeResponse.json();
+  assert.ok(beforeBody.entries.some((entry) => entry.event === 'http request completed'));
+
+  const clearResponse = await fetch(`${baseUrl}/logs/recent`, {
+    method: 'DELETE',
+    headers: {
+      cookie,
+    },
+  });
+
+  assert.equal(clearResponse.status, 200);
+  const clearBody = await clearResponse.json();
+  assert.equal(clearBody.ok, true);
+  assert.ok(clearBody.removedCount >= 1);
+  assert.equal(clearBody.entries.length, 1);
+  assert.equal(clearBody.entries[0].event, 'recent logs cleared');
+  assert.equal(clearBody.entries[0].details.removedCount, clearBody.removedCount);
 });
 
 test('POST /v1/messages enforces configurable concurrency and queue limits', async () => {

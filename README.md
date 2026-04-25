@@ -32,6 +32,7 @@
 - `GET /proxy-api-key` 현재 런타임 x-api-key 상태 조회 (문서 로그인 필요)
 - `POST /proxy-api-key` 런타임 x-api-key 저장/리셋 (문서 로그인 필요)
 - `GET /logs/recent` 최근 프록시 로그 + 동시성 상태 조회 (문서 로그인 필요)
+- `DELETE /logs/recent` 최근 프록시 로그 비우기 (문서 로그인 필요)
 - Anthropic 스타일 JSON 응답
 - `stream: true` 요청에 대한 SSE 응답
 - `system`, `messages`, `stop_sequences` 처리
@@ -251,6 +252,8 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, Redis에 저장된 값이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
+- 최근 로그 패널은 검색, 레벨 필터, 자동 새로고침 on/off, JSON 저장, 로그 비우기를 지원
+- HTTP access log는 method/path/status/duration을 남기되 `/logs/recent`, `/health`, `/ready`, `/metrics` 같은 poll/probe 경로는 제외해서 노이즈를 줄임
 - 최근 로그도 Redis에 저장되므로 재시작 후 다시 볼 수 있음
 - 최근 로그가 Redis에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
 - `/docs` 로그인 세션과 로그인 시도 제한도 Redis에 저장되어 여러 Pod 사이에서 공유됨
@@ -735,6 +738,13 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
+IDC HTTP ingress 예시:
+
+```bash
+EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http.yaml \
+./deploy/k8s/deploy-helm.sh
+```
+
 자세한 값과 예시는 아래 문서 참고:
 
 - `deploy/k8s/README.md`
@@ -746,6 +756,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 - `charts/claude-anthropic-proxy/examples/external-secret.yaml`
 - `charts/claude-anthropic-proxy/examples/sealed-secret.yaml`
 - `charts/claude-anthropic-proxy/examples/values-ingress-cert-manager.yaml`
+- `charts/claude-anthropic-proxy/examples/values-ingress-idc-http.yaml`
 - `charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml`
 - `charts/claude-anthropic-proxy/examples/clusterissuer-letsencrypt.yaml`
 
@@ -790,7 +801,7 @@ npm test
 - 문서 화면 로그인 세션, 비밀번호 실패, rate limit
 - Claude CLI 로그인 상태 조회와 웹 로그인/로그아웃 작업
 - 런타임 `x-api-key` 조회, 저장, 리셋, 이전 키 grace period, 요청 인증 강제
-- 최근 로그 조회, 영속 저장, 민감 필드 redaction
+- 최근 로그 조회/비우기, HTTP access log, 영속 저장, 민감 필드 redaction
 - 로컬 `/v1/messages` 동시성 제한, 큐 제한, 큐 timeout
 - Redis 기반 전역 message semaphore, Redis 대기열 timeout
 - Redis state store 기반 x-api-key / 최근 로그 저장

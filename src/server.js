@@ -194,18 +194,60 @@ function routeKey(req) {
   return `${req.method} ${req.url}`;
 }
 
+function requestPathname(req) {
+  try {
+    return new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    return req.url || '/';
+  }
+}
+
+function shouldAddAccessLog(req) {
+  const pathname = requestPathname(req);
+
+  // These endpoints are usually hit by probes or by the log panel itself.
+  // Keeping them out prevents the UI from becoming a self-refresh log storm.
+  return !['/health', '/ready', '/metrics', '/logs/recent'].includes(pathname);
+}
+
+function accessLogLevel(statusCode) {
+  if (statusCode >= 500) return 'error';
+  if (statusCode >= 400) return 'warn';
+  return 'info';
+}
+
 function recordRequest(req, res) {
   let finished = false;
+  const startedAt = Date.now();
   metrics.requests.total += 1;
   incrementCounter(metrics.requests.byRoute, routeKey(req));
   res.on('finish', () => {
     finished = true;
     incrementCounter(metrics.requests.status, String(res.statusCode));
+
+    if (shouldAddAccessLog(req)) {
+      const requestId = res.getHeader('request-id');
+      log('http request completed', {
+        method: req.method,
+        path: requestPathname(req),
+        statusCode: res.statusCode,
+        durationMs: Date.now() - startedAt,
+        requestId: typeof requestId === 'string' ? requestId : undefined,
+      }, accessLogLevel(res.statusCode));
+    }
   });
   res.on('close', () => {
     if (finished) return;
     metrics.requests.aborted += 1;
     incrementCounter(metrics.requests.status, 'aborted');
+
+    if (shouldAddAccessLog(req)) {
+      log('http request aborted', {
+        method: req.method,
+        path: requestPathname(req),
+        durationMs: Date.now() - startedAt,
+      }, 'warn');
+    }
   });
 }
 
@@ -874,6 +916,29 @@ async function handleRecentLogs(req, res) {
   });
 }
 
+async function handleRecentLogsClear(req, res) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+    return;
+  }
+
+  const removedCount = recentLogStore.getStatus().entryCount;
+  recentLogStore.clear();
+  log('recent logs cleared', { removedCount }, 'warn');
+  await recentLogStore.flush();
+  const messageExecution = await messageConcurrencyManager.getLiveStatus();
+
+  json(res, 200, {
+    ok: true,
+    removedCount,
+    entries: recentLogStore.list(),
+    logStore: recentLogStore.getStatus(),
+    stateBackend: config.stateBackend,
+    messageExecution,
+  }, {
+    'cache-control': 'no-store',
+  });
+}
+
 function applyProxyAuth(req, requestId) {
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
@@ -1323,6 +1388,11 @@ function requestHandler(req, res) {
 
   if (req.method === 'GET' && req.url === '/logs/recent') {
     void handleRecentLogs(req, res);
+    return;
+  }
+
+  if (req.method === 'DELETE' && req.url === '/logs/recent') {
+    void handleRecentLogsClear(req, res);
     return;
   }
 

@@ -213,6 +213,12 @@ function renderLayout({ title, eyebrow, body }) {
         border: 1px solid var(--line);
       }
 
+      button.danger {
+        background: rgba(127, 29, 29, 0.18);
+        border: 1px solid rgba(248, 113, 113, 0.38);
+        color: #fecaca;
+      }
+
       .checkbox-row {
         display: flex;
         align-items: center;
@@ -239,6 +245,76 @@ function renderLayout({ title, eyebrow, body }) {
         border-radius: 16px;
         border: 1px solid var(--line);
         background: rgba(8, 12, 28, 0.55);
+      }
+
+      .log-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .log-controls {
+        margin-top: 14px;
+      }
+
+      .log-controls label {
+        min-width: 180px;
+        flex: 1 1 180px;
+      }
+
+      .log-list {
+        display: grid;
+        gap: 12px;
+        max-height: 520px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .log-entry {
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--accent);
+        border-radius: 16px;
+        padding: 14px;
+        background: rgba(8, 12, 28, 0.62);
+      }
+
+      .log-entry.level-warn { border-left-color: #fbbf24; }
+      .log-entry.level-error { border-left-color: var(--danger); }
+
+      .log-entry-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+
+      .log-event {
+        font-weight: 800;
+      }
+
+      .log-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .log-chip {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 8px;
+        background: rgba(15, 23, 42, 0.85);
+      }
+
+      .log-details {
+        margin-top: 10px;
+        font-size: 0.86rem;
       }
 
       .error {
@@ -468,23 +544,45 @@ export function renderHomePage(config) {
         </article>
       </section>
 
-      <section class="split" style="margin-top: 20px;">
-        <article class="panel">
+      <section class="panel" style="margin-top: 20px;">
+        <div class="topbar">
+          <div>
           <h2>최근 로그 / 동시성 상태</h2>
           <p class="muted">
-            최근 요청 로그와 현재 실행 중인 메시지 요청 수를 여기서 확인할 수 있습니다.
-            로그는 메모리 ring buffer 기준이라 최근 항목만 유지됩니다.
+            최근 요청, 인증, 키 변경, Claude 실행 이벤트를 한 화면에서 확인합니다.
+            검색과 레벨 필터로 장애 원인을 빠르게 좁히고, 필요하면 JSON으로 내려받을 수 있습니다.
           </p>
-          <div class="banner" style="margin-bottom: 16px;">
-            <div id="recent-log-summary"><strong>로그 상태 확인 중...</strong></div>
-            <div class="muted" style="margin-top: 8px;">자동 새로고침은 3초 간격입니다.</div>
           </div>
           <button id="recent-log-refresh" type="button" class="secondary">지금 새로고침</button>
-        </article>
-        <article class="panel">
-          <h2>최근 로그 출력</h2>
-          <pre id="recent-log-output">아직 읽어온 로그가 없습니다.</pre>
-        </article>
+        </div>
+        <div class="banner">
+            <div id="recent-log-summary"><strong>로그 상태 확인 중...</strong></div>
+            <div class="muted" style="margin-top: 8px;">로그 새로고침 요청 자체는 로그에 남기지 않아 화면이 스스로를 오염시키지 않습니다.</div>
+        </div>
+        <div class="log-controls">
+          <label>
+            로그 검색
+            <input id="recent-log-search" type="search" placeholder="event, requestId, statusCode 검색" />
+          </label>
+          <label>
+            레벨 필터
+            <select id="recent-log-level">
+              <option value="all">전체</option>
+              <option value="error">error</option>
+              <option value="warn">warn</option>
+              <option value="info">info</option>
+            </select>
+          </label>
+          <label class="checkbox-row" style="flex: 0 1 auto; min-width: 210px;">
+            <input id="recent-log-auto-refresh" type="checkbox" checked />
+            <span>3초 자동 새로고침</span>
+          </label>
+          <button id="recent-log-export" type="button" class="secondary">JSON 저장</button>
+          <button id="recent-log-clear" type="button" class="danger">로그 비우기</button>
+        </div>
+        <div id="recent-log-output" class="log-list" aria-live="polite" style="margin-top: 16px;">
+          <div class="banner muted">아직 읽어온 로그가 없습니다.</div>
+        </div>
       </section>
 
       <section class="split" style="margin-top: 20px;">
@@ -554,6 +652,11 @@ export function renderHomePage(config) {
         const recentLogSummary = document.getElementById('recent-log-summary');
         const recentLogOutput = document.getElementById('recent-log-output');
         const recentLogRefresh = document.getElementById('recent-log-refresh');
+        const recentLogSearch = document.getElementById('recent-log-search');
+        const recentLogLevel = document.getElementById('recent-log-level');
+        const recentLogAutoRefresh = document.getElementById('recent-log-auto-refresh');
+        const recentLogExport = document.getElementById('recent-log-export');
+        const recentLogClear = document.getElementById('recent-log-clear');
 
         const claudeAuthSummary = document.getElementById('claude-auth-summary');
         const claudeAuthDetail = document.getElementById('claude-auth-detail');
@@ -567,6 +670,8 @@ export function renderHomePage(config) {
         const claudeAuthLinks = document.getElementById('claude-auth-links');
         let claudeAuthPollTimer = null;
         let recentLogTimer = null;
+        let recentLogEntries = [];
+        let recentLogPayload = { entries: [], messageExecution: {}, logStore: { healthy: true } };
         let proxyApiKeyConfigured = ${JSON.stringify(Boolean(config.proxyApiKey))};
         let proxyApiKeyHeaderRequired = ${JSON.stringify(headerRequired)};
 
@@ -656,28 +761,130 @@ export function renderHomePage(config) {
           }
         }
 
-        function formatRecentLogEntry(entry) {
-          const header = '[' + entry.at + '] ' + String(entry.level || 'info').toUpperCase() + ' ' + entry.event;
-          const details = entry.details && Object.keys(entry.details).length
-            ? '\\n' + JSON.stringify(entry.details, null, 2)
-            : '';
-          return header + details;
+        function renderRecentLogSummary(payload, visibleEntries) {
+          const stats = payload.messageExecution || {};
+          const entries = Array.isArray(payload.entries) ? payload.entries : [];
+          const errorCount = entries.filter((entry) => entry.level === 'error').length;
+          const warnCount = entries.filter((entry) => entry.level === 'warn').length;
+          const concurrencyLabel = stats.enabled
+            ? (
+              stats.backend === 'redis-global'
+                ? ('global active ' + stats.globalActive + '/' + stats.maxConcurrent + ' · global queued ' + stats.globalQueued + ' · local queued ' + stats.queued + '/' + stats.maxQueued)
+                : ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued)
+            )
+            : 'unlimited';
+          const status = payload.logStore || {};
+
+          recentLogSummary.replaceChildren();
+          const primary = document.createElement('div');
+          const primaryStrong = document.createElement('strong');
+          primaryStrong.textContent = '동시성 ';
+          primary.append(primaryStrong, document.createTextNode(concurrencyLabel));
+
+          const secondary = document.createElement('div');
+          secondary.className = 'muted';
+          secondary.style.marginTop = '8px';
+          secondary.textContent = '표시 ' + visibleEntries.length + '/' + entries.length
+            + ' · error ' + errorCount
+            + ' · warn ' + warnCount
+            + ' · 저장소 ' + (status.healthy ? '정상' : '오류');
+
+          recentLogSummary.append(primary, secondary);
+        }
+
+        function createLogChip(text) {
+          const chip = document.createElement('span');
+          chip.className = 'log-chip';
+          chip.textContent = text;
+          return chip;
+        }
+
+        function createLogEntryElement(entry) {
+          const item = document.createElement('article');
+          const level = String(entry.level || 'info').toLowerCase();
+          item.className = 'log-entry level-' + level;
+
+          const header = document.createElement('div');
+          header.className = 'log-entry-header';
+
+          const title = document.createElement('div');
+          title.className = 'log-event';
+          title.textContent = entry.event || '(unknown event)';
+
+          const meta = document.createElement('div');
+          meta.className = 'log-meta';
+          meta.append(
+            createLogChip(level.toUpperCase()),
+            createLogChip(entry.at ? new Date(entry.at).toLocaleString() : '-'),
+          );
+
+          if (entry.details && entry.details.statusCode) {
+            meta.append(createLogChip('HTTP ' + entry.details.statusCode));
+          }
+
+          if (entry.details && entry.details.durationMs != null) {
+            meta.append(createLogChip(entry.details.durationMs + 'ms'));
+          }
+
+          header.append(title, meta);
+          item.appendChild(header);
+
+          if (entry.details && Object.keys(entry.details).length) {
+            const details = document.createElement('pre');
+            details.className = 'log-details';
+            details.textContent = JSON.stringify(entry.details, null, 2);
+            item.appendChild(details);
+          }
+
+          return item;
+        }
+
+        function filteredRecentLogEntries() {
+          const selectedLevel = recentLogLevel.value;
+          const search = recentLogSearch.value.trim().toLowerCase();
+
+          return recentLogEntries.filter((entry) => {
+            if (selectedLevel !== 'all' && String(entry.level || '').toLowerCase() !== selectedLevel) {
+              return false;
+            }
+
+            if (!search) {
+              return true;
+            }
+
+            return [
+              entry.at,
+              entry.level,
+              entry.event,
+              JSON.stringify(entry.details || {}),
+            ].join(' ').toLowerCase().includes(search);
+          });
+        }
+
+        function renderRecentLogEntries(payload) {
+          const visibleEntries = filteredRecentLogEntries();
+          renderRecentLogSummary(payload, visibleEntries);
+          recentLogOutput.replaceChildren();
+
+          if (!visibleEntries.length) {
+            const empty = document.createElement('div');
+            empty.className = 'banner muted';
+            empty.textContent = recentLogEntries.length
+              ? '현재 필터에 맞는 로그가 없습니다.'
+              : '아직 최근 로그가 없습니다.';
+            recentLogOutput.appendChild(empty);
+            return;
+          }
+
+          for (const entry of visibleEntries) {
+            recentLogOutput.appendChild(createLogEntryElement(entry));
+          }
         }
 
         function renderRecentLogs(payload) {
-          const stats = payload.messageExecution || {};
-          const concurrencyLabel = stats.enabled
-            ? (
-              (stats.backend === 'redis-global'
-                ? ('global active ' + stats.globalActive + '/' + stats.maxConcurrent + ' · global queued ' + stats.globalQueued + ' · local queued ' + stats.queued + '/' + stats.maxQueued)
-                : ('active ' + stats.active + '/' + stats.maxConcurrent + ' · queued ' + stats.queued + '/' + stats.maxQueued))
-            )
-            : 'unlimited';
-          recentLogSummary.innerHTML = '<strong>동시성</strong> ' + concurrencyLabel;
-          const entries = Array.isArray(payload.entries) ? payload.entries : [];
-          recentLogOutput.textContent = entries.length
-            ? entries.map(formatRecentLogEntry).join('\\n\\n')
-            : '아직 최근 로그가 없습니다.';
+          recentLogPayload = payload;
+          recentLogEntries = Array.isArray(payload.entries) ? payload.entries : [];
+          renderRecentLogEntries(payload);
         }
 
         async function refreshRecentLogs() {
@@ -687,6 +894,17 @@ export function renderHomePage(config) {
           } catch (error) {
             recentLogSummary.innerHTML = '<strong>최근 로그 확인 실패</strong>';
             recentLogOutput.textContent = error.message;
+          }
+        }
+
+        function syncRecentLogTimer() {
+          if (recentLogTimer) {
+            clearInterval(recentLogTimer);
+            recentLogTimer = null;
+          }
+
+          if (recentLogAutoRefresh.checked) {
+            recentLogTimer = setInterval(refreshRecentLogs, 3000);
           }
         }
 
@@ -714,6 +932,44 @@ export function renderHomePage(config) {
 
         recentLogRefresh.addEventListener('click', () => {
           void refreshRecentLogs();
+        });
+
+        recentLogSearch.addEventListener('input', () => {
+          renderRecentLogEntries(recentLogPayload);
+        });
+
+        recentLogLevel.addEventListener('change', () => {
+          renderRecentLogEntries(recentLogPayload);
+        });
+
+        recentLogAutoRefresh.addEventListener('change', syncRecentLogTimer);
+
+        recentLogExport.addEventListener('click', () => {
+          const data = JSON.stringify(filteredRecentLogEntries(), null, 2);
+          const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = 'claude-proxy-recent-logs.json';
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 0);
+        });
+
+        recentLogClear.addEventListener('click', async () => {
+          if (!confirm('최근 로그를 비울까요? 이 작업은 저장된 최근 로그 버퍼를 삭제합니다.')) {
+            return;
+          }
+
+          recentLogClear.disabled = true;
+          try {
+            const payload = await fetchJson('/logs/recent', { method: 'DELETE' });
+            renderRecentLogs(payload);
+          } catch (error) {
+            recentLogSummary.textContent = error.message;
+          } finally {
+            recentLogClear.disabled = false;
+          }
         });
 
         proxyApiKeyReset.addEventListener('click', async () => {
@@ -894,7 +1150,7 @@ export function renderHomePage(config) {
         refreshRecentLogs();
         refreshClaudeAuthStatus();
         refreshClaudeAuthOperation();
-        recentLogTimer = setInterval(refreshRecentLogs, 3000);
+        syncRecentLogTimer();
       </script>
     `,
   });
