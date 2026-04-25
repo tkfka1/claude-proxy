@@ -76,6 +76,35 @@ async function loginDocs(baseUrl, password = 'docs-secret') {
   return (loginResponse.headers.get('set-cookie') || '').split(';', 1)[0];
 }
 
+async function getDocsCsrfToken(baseUrl, cookie) {
+  const response = await fetch(`${baseUrl}/docs`, {
+    headers: {
+      cookie,
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  const match = /<meta name="csrf-token" content="([^"]+)" \/>/.exec(body);
+  assert.ok(match?.[1], 'docs page should expose a CSRF token for console actions');
+  return match[1];
+}
+
+async function loginDocsSession(baseUrl, password = 'docs-secret') {
+  const cookie = await loginDocs(baseUrl, password);
+  const csrfToken = await getDocsCsrfToken(baseUrl, cookie);
+  return { cookie, csrfToken };
+}
+
+function docsJsonHeaders({ cookie, csrfToken }, extra = {}) {
+  return {
+    cookie,
+    'x-csrf-token': csrfToken,
+    'content-type': 'application/json',
+    ...extra,
+  };
+}
+
 async function waitForClaudeAuthOperation(baseUrl, cookie, expectedStatus) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const response = await fetch(`${baseUrl}/claude-auth/operation`, {
@@ -300,8 +329,11 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /Claude Proxy/);
   assert.doesNotMatch(body, /Control room/);
   assert.match(body, /System status/);
+  assert.match(body, /<meta name="csrf-token" content="[a-f0-9]{64}" \/>/);
   assert.match(body, /id="system-status-refresh"/);
   assert.match(body, /id="system-status-grid"/);
+  assert.match(body, /Console guard/);
+  assert.match(body, /CSRF \+ SameSite/);
   assert.match(body, /href="#system-status"/);
   assert.match(body, /Routes/);
   assert.match(body, /POST/);
@@ -369,24 +401,16 @@ test('POST /login rate limits repeated failed passwords', async () => {
 
 test('POST /logout clears the docs session', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-
-  const loginResponse = await fetch(`${baseUrl}/login`, {
-    method: 'POST',
-    redirect: 'manual',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ password: 'docs-secret' }),
-  });
-
-  const sessionCookie = (loginResponse.headers.get('set-cookie') || '').split(';', 1)[0];
+  const { cookie: sessionCookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const logoutResponse = await fetch(`${baseUrl}/logout`, {
     method: 'POST',
     redirect: 'manual',
     headers: {
       cookie: sessionCookie,
+      'content-type': 'application/x-www-form-urlencoded',
     },
+    body: new URLSearchParams({ csrfToken }),
   });
 
   assert.equal(logoutResponse.status, 303);
@@ -435,19 +459,47 @@ test('POST /call-test requires docs authentication', async () => {
   assert.equal(body.error, 'Web docs login is required.');
 });
 
+test('docs state-changing endpoints reject missing CSRF tokens', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
+
+  const missingResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      apiKey: 'csrf-should-not-save',
+    }),
+  });
+
+  assert.equal(missingResponse.status, 403);
+  const missingBody = await missingResponse.json();
+  assert.equal(missingBody.ok, false);
+  assert.match(missingBody.error, /CSRF token/);
+
+  const validResponse = await fetch(`${baseUrl}/proxy-api-key`, {
+    method: 'POST',
+    headers: docsJsonHeaders({ cookie, csrfToken }),
+    body: JSON.stringify({
+      apiKey: 'csrf-save-ok',
+    }),
+  });
+
+  assert.equal(validResponse.status, 200);
+});
+
 test('POST /call-test runs a real proxied message call', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'call test ok';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
   await proxyApiKeyManager.resetApiKey('runtime-secret-key');
   config.allowMissingApiKeyHeader = false;
 
   const response = await fetch(`${baseUrl}/call-test`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      cookie,
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 32,
@@ -481,15 +533,12 @@ test('POST /call-test runs a real proxied message call', async () => {
 
 test('POST /call-test reports missing proxy key when headers are disallowed', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
   config.allowMissingApiKeyHeader = false;
 
   const response = await fetch(`${baseUrl}/call-test`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      cookie,
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({}),
   });
 
@@ -612,7 +661,7 @@ test('GET /logs/recent requires docs authentication', async () => {
 
 test('POST /web-password changes docs password and invalidates the current session', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const statusResponse = await fetch(`${baseUrl}/web-password`, {
     headers: {
@@ -627,10 +676,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
 
   const wrongCurrentResponse = await fetch(`${baseUrl}/web-password`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       currentPassword: 'wrong-password',
       newPassword: 'docs-secret-updated-123',
@@ -640,10 +686,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
 
   const emptyPasswordResponse = await fetch(`${baseUrl}/web-password`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       currentPassword: 'docs-secret',
       newPassword: '',
@@ -653,10 +696,7 @@ test('POST /web-password changes docs password and invalidates the current sessi
 
   const updateResponse = await fetch(`${baseUrl}/web-password`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       currentPassword: 'docs-secret',
       newPassword: '1234',
@@ -701,14 +741,11 @@ test('POST /web-password changes docs password and invalidates the current sessi
 
 test('POST /proxy-api-key updates the runtime x-api-key after docs login', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const updateResponse = await fetch(`${baseUrl}/proxy-api-key`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       apiKey: 'runtime-secret-key',
     }),
@@ -741,14 +778,11 @@ test('POST /proxy-api-key updates the runtime x-api-key after docs login', async
 test('POST /proxy-api-key reset rotates the runtime key with previous-key grace', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const firstResponse = await fetch(`${baseUrl}/proxy-api-key`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       apiKey: 'runtime-secret-key',
     }),
@@ -760,10 +794,7 @@ test('POST /proxy-api-key reset rotates the runtime key with previous-key grace'
 
   const resetResponse = await fetch(`${baseUrl}/proxy-api-key`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       reset: true,
     }),
@@ -998,7 +1029,7 @@ test('DELETE /logs/recent clears recent logs after docs authentication', async (
   assert.equal(unauthenticatedResponse.status, 401);
 
   await fetch(`${baseUrl}/api-info`);
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const beforeResponse = await fetch(`${baseUrl}/logs/recent`, {
     headers: {
@@ -1012,6 +1043,7 @@ test('DELETE /logs/recent clears recent logs after docs authentication', async (
     method: 'DELETE',
     headers: {
       cookie,
+      'x-csrf-token': csrfToken,
     },
   });
 
@@ -1211,14 +1243,11 @@ test('POST /v1/messages stays locked until x-api-key is configured when missing 
 
 test('POST /claude-auth/login starts Claude login and updates auth state', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const response = await fetch(`${baseUrl}/claude-auth/login`, {
     method: 'POST',
-    headers: {
-      cookie,
-      'content-type': 'application/json',
-    },
+    headers: docsJsonHeaders({ cookie, csrfToken }),
     body: JSON.stringify({
       provider: 'console',
       email: 'web-auth@example.com',
@@ -1252,12 +1281,13 @@ test('POST /claude-auth/logout starts Claude logout and clears auth state', asyn
   });
 
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
-  const cookie = await loginDocs(baseUrl);
+  const { cookie, csrfToken } = await loginDocsSession(baseUrl);
 
   const response = await fetch(`${baseUrl}/claude-auth/logout`, {
     method: 'POST',
     headers: {
       cookie,
+      'x-csrf-token': csrfToken,
     },
   });
 

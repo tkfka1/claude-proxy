@@ -84,6 +84,7 @@ function parseWebSession(raw) {
   return {
     expiresAt,
     passwordUpdatedAt: payload.passwordUpdatedAt == null ? null : String(payload.passwordUpdatedAt),
+    csrfToken: payload.csrfToken == null ? null : String(payload.csrfToken),
   };
 }
 
@@ -258,8 +259,8 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
 
           return parseWebSession(raw);
         },
-        async createSession({ token, expiresAt, passwordUpdatedAt = null, ttlMs }) {
-          await client.set(`${sessionPrefix}:${token}`, JSON.stringify({ expiresAt, passwordUpdatedAt }), {
+        async createSession({ token, expiresAt, passwordUpdatedAt = null, csrfToken = null, ttlMs }) {
+          await client.set(`${sessionPrefix}:${token}`, JSON.stringify({ expiresAt, passwordUpdatedAt, csrfToken }), {
             PX: ttlMs,
           });
         },

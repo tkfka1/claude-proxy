@@ -60,9 +60,12 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
+function renderLayout({ title, eyebrow = '', body, pageClass = '', csrfToken = '' }) {
   const eyebrowBlock = eyebrow
     ? `<div class="eyebrow">${escapeHtml(eyebrow)}</div>`
+    : '';
+  const csrfMeta = csrfToken
+    ? `<meta name="csrf-token" content="${escapeHtml(csrfToken)}" />`
     : '';
 
   return `<!doctype html>
@@ -70,6 +73,7 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    ${csrfMeta}
     <meta name="theme-color" content="#070806" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Claude Proxy" />
@@ -1112,7 +1116,7 @@ ${authHeaderLine}  -d '{
   };
 }
 
-export function renderHomePage(config) {
+export function renderHomePage(config, { csrfToken = '' } = {}) {
   const defaultAnthropicVersion = escapeHtml(config.defaultAnthropicVersion);
   const defaultModel = escapeHtml(config.claudeDefaultModel);
   const baseUrl = `http://localhost:${config.port}`;
@@ -1131,6 +1135,7 @@ export function renderHomePage(config) {
   return renderLayout({
     title: 'Claude Proxy Console',
     pageClass: 'console-page',
+    csrfToken,
     body: `
       <div class="topbar console-topbar">
         <div>
@@ -1140,7 +1145,10 @@ export function renderHomePage(config) {
           </div>
           <h1>Claude Proxy</h1>
         </div>
-        <form method="post" action="/logout" class="top-actions"><button type="submit" class="secondary">로그아웃</button></form>
+        <form method="post" action="/logout" class="top-actions">
+          <input type="hidden" name="csrfToken" value="${escapeHtml(csrfToken)}" />
+          <button type="submit" class="secondary">로그아웃</button>
+        </form>
       </div>
 
       <nav class="mobile-quick-nav" aria-label="빠른 이동">
@@ -1167,6 +1175,10 @@ export function renderHomePage(config) {
         <article class="stat-card">
           <span>Console auth</span>
           <strong id="web-password-note">${config.webPasswordHash ? 'hashed password' : 'password'}</strong>
+        </article>
+        <article class="stat-card">
+          <span>Console guard</span>
+          <strong>CSRF + SameSite</strong>
         </article>
       </div>
 
@@ -1392,6 +1404,7 @@ export function renderHomePage(config) {
       <script>
         const docsBaseUrl = ${JSON.stringify(baseUrl)};
         const docsAnthropicVersion = ${JSON.stringify(config.defaultAnthropicVersion)};
+        const docsCsrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const proxyApiKeySummary = document.getElementById('proxy-api-key-summary');
         const proxyApiKeyDetail = document.getElementById('proxy-api-key-detail');
         const proxyApiKeyPreview = document.getElementById('proxy-api-key-preview');
@@ -1451,8 +1464,24 @@ export function renderHomePage(config) {
         let proxyApiKeyConfigured = ${JSON.stringify(Boolean(config.proxyApiKey))};
         let proxyApiKeyHeaderRequired = ${JSON.stringify(headerRequired)};
 
+        function withCsrf(options = {}) {
+          const method = String(options.method || 'GET').toUpperCase();
+
+          if (!docsCsrfToken || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+            return options;
+          }
+
+          return {
+            ...options,
+            headers: {
+              ...(options.headers || {}),
+              'x-csrf-token': docsCsrfToken,
+            },
+          };
+        }
+
         async function fetchJson(url, options) {
-          const response = await fetch(url, options);
+          const response = await fetch(url, withCsrf(options));
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) {
             throw new Error(payload.error || ('Request failed: ' + response.status));
@@ -1461,7 +1490,7 @@ export function renderHomePage(config) {
         }
 
         async function fetchJsonWithStatus(url, options) {
-          const response = await fetch(url, options);
+          const response = await fetch(url, withCsrf(options));
           const payload = await response.json().catch(() => ({}));
           return { response, payload };
         }

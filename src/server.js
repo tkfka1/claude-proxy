@@ -99,8 +99,8 @@ const webAuthStateStore = stateBackend
 
         return { ...session };
       },
-      async createSession({ token, expiresAt, passwordUpdatedAt }) {
-        webSessions.set(token, { expiresAt, passwordUpdatedAt });
+      async createSession({ token, expiresAt, passwordUpdatedAt, csrfToken = null }) {
+        webSessions.set(token, { expiresAt, passwordUpdatedAt, csrfToken });
       },
       async deleteSession(token) {
         webSessions.delete(token);
@@ -746,26 +746,42 @@ async function getWebSession(req) {
     return null;
   }
 
-  return {
+  const hydratedSession = {
     token,
     ...session,
   };
+
+  if (!hydratedSession.csrfToken && hydratedSession.expiresAt > Date.now()) {
+    hydratedSession.csrfToken = crypto.randomBytes(32).toString('hex');
+    await webAuthStateStore.createSession({
+      token,
+      expiresAt: hydratedSession.expiresAt,
+      passwordUpdatedAt: hydratedSession.passwordUpdatedAt,
+      csrfToken: hydratedSession.csrfToken,
+      ttlMs: Math.max(1_000, hydratedSession.expiresAt - Date.now()),
+    });
+  }
+
+  return hydratedSession;
 }
 
 async function createWebSession() {
   const maxAgeSeconds = config.webSessionTtlHours * 60 * 60;
   const token = crypto.randomBytes(32).toString('hex');
+  const csrfToken = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + maxAgeSeconds * 1000;
 
   await webAuthStateStore.createSession({
     token,
     expiresAt,
+    csrfToken,
     passwordUpdatedAt: getWebPasswordVersion(),
     ttlMs: maxAgeSeconds * 1000,
   });
 
   return {
     token,
+    csrfToken,
     maxAgeSeconds,
   };
 }
@@ -896,6 +912,88 @@ async function ensureDocsAccess(req, res, { requireWebLogin = false } = {}) {
   return false;
 }
 
+function getRequestHeader(req, name) {
+  const value = req.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function timingSafeStringEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''), 'utf8');
+  const rightBuffer = Buffer.from(String(right || ''), 'utf8');
+
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function getRequestCsrfToken(req, fallbackToken = '') {
+  return String(
+    fallbackToken
+    || getRequestHeader(req, 'x-csrf-token')
+    || getRequestHeader(req, 'x-xsrf-token')
+    || '',
+  ).trim();
+}
+
+function docsCsrfMatches(session, token) {
+  return Boolean(session?.csrfToken && token && timingSafeStringEqual(session.csrfToken, token));
+}
+
+function sendDocsCsrfError(res, status, message, { htmlResponse = false } = {}) {
+  if (htmlResponse) {
+    html(
+      res,
+      status,
+      renderLoginPage({
+        errorMessage: message,
+        loginPath: '/login',
+      }),
+      {
+        'cache-control': 'no-store',
+        vary: 'Cookie',
+      },
+    );
+    return;
+  }
+
+  jsonError(res, status, message);
+}
+
+async function ensureDocsCsrf(req, res, { token = '', htmlResponse = false } = {}) {
+  try {
+    await refreshWebPasswordState({ reason: 'docs-csrf' });
+
+    if (!isWebLoginEnabled()) {
+      sendDocsCsrfError(
+        res,
+        403,
+        'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.',
+        { htmlResponse },
+      );
+      return null;
+    }
+
+    const session = await getWebSession(req);
+    if (!session) {
+      sendDocsCsrfError(res, 401, 'Web docs login is required.', { htmlResponse });
+      return null;
+    }
+
+    const csrfToken = getRequestCsrfToken(req, token);
+    if (!docsCsrfMatches(session, csrfToken)) {
+      log('docs csrf rejected', { client: getWebLoginKey(req), path: req.url }, 'warn');
+      sendDocsCsrfError(res, 403, 'CSRF token is invalid or missing. Refresh the console and retry.', {
+        htmlResponse,
+      });
+      return null;
+    }
+
+    return session;
+  } catch (error) {
+    log('docs csrf check failed', { error: error.message }, 'error');
+    sendDocsCsrfError(res, 503, 'Docs auth state is temporarily unavailable.', { htmlResponse });
+    return null;
+  }
+}
+
 function renderDocsStateUnavailable(res, message) {
   html(
     res,
@@ -1001,7 +1099,15 @@ async function handleWebLogin(req, res) {
 
 async function handleWebLogout(req, res) {
   try {
-    const session = await getWebSession(req);
+    const form = await readFormBody(req);
+    const session = await ensureDocsCsrf(req, res, {
+      token: String(form.get('csrfToken') || ''),
+      htmlResponse: true,
+    });
+    if (!session) {
+      return;
+    }
+
     if (session) {
       await webAuthStateStore.deleteSession(session.token);
     }
@@ -1035,12 +1141,12 @@ async function handleWebPasswordStatus(req, res) {
 }
 
 async function handleWebPasswordUpdate(req, res) {
-  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+  const session = await ensureDocsCsrf(req, res);
+  if (!session) {
     return;
   }
 
   try {
-    const session = await getWebSession(req);
     const body = await readJsonBody(req, 16 * 1024);
     const currentPassword = String(body?.currentPassword || '');
     const newPassword = validateNewWebPassword(body?.newPassword);
@@ -1119,7 +1225,7 @@ function handleClaudeAuthOperation(req, res) {
 }
 
 async function handleClaudeAuthLogin(req, res) {
-  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+  if (!(await ensureDocsCsrf(req, res))) {
     return;
   }
 
@@ -1150,7 +1256,7 @@ async function handleClaudeAuthLogin(req, res) {
 
 function handleClaudeAuthLogout(req, res) {
   void (async () => {
-    if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+    if (!(await ensureDocsCsrf(req, res))) {
       return;
     }
 
@@ -1195,7 +1301,7 @@ function handleProxyApiKeyStatus(req, res) {
 }
 
 async function handleProxyApiKeyUpdate(req, res) {
-  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+  if (!(await ensureDocsCsrf(req, res))) {
     return;
   }
 
@@ -1245,7 +1351,7 @@ async function handleRecentLogs(req, res) {
 }
 
 async function handleRecentLogsClear(req, res) {
-  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+  if (!(await ensureDocsCsrf(req, res))) {
     return;
   }
 
@@ -1335,7 +1441,7 @@ function previewPrompt(prompt) {
 async function handleCallTest(req, res) {
   const requestId = createRequestId();
 
-  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+  if (!(await ensureDocsCsrf(req, res))) {
     return;
   }
 
@@ -1855,7 +1961,10 @@ function requestHandler(req, res) {
   if (req.method === 'GET' && req.url === '/docs') {
     void (async () => {
       try {
-        if (!(await hasDocsAccess(req))) {
+        await refreshWebPasswordState({ reason: 'docs-page' });
+        const session = isWebLoginEnabled() ? await getWebSession(req) : null;
+
+        if (isWebLoginEnabled() && !session) {
           html(res, 200, renderLoginPage({ loginPath: '/login' }), {
             vary: 'Cookie',
             'cache-control': 'no-store',
@@ -1863,7 +1972,7 @@ function requestHandler(req, res) {
           return;
         }
 
-        html(res, 200, renderHomePage(config), {
+        html(res, 200, renderHomePage(config, { csrfToken: session?.csrfToken || '' }), {
           vary: 'Cookie',
           'cache-control': 'no-store',
         });

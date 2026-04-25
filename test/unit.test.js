@@ -932,9 +932,11 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
     token: 'session-token',
     expiresAt: Date.now() + 60_000,
     passwordUpdatedAt: '2026-04-25T00:00:00.000Z',
+    csrfToken: 'csrf-token',
     ttlMs: 60_000,
   });
   assert.equal((await webAuthStore.getSession('session-token')).passwordUpdatedAt, '2026-04-25T00:00:00.000Z');
+  assert.equal((await webAuthStore.getSession('session-token')).csrfToken, 'csrf-token');
   await webAuthStore.setLoginAttempt('client-key', {
     count: 2,
     windowStartedAt: 1,

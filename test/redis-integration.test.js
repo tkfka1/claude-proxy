@@ -64,11 +64,13 @@ test('real Redis backend stores proxy state, recent logs, web auth, and readines
       token: 'session-token',
       expiresAt: Date.now() + 60_000,
       passwordUpdatedAt: '2026-04-25T00:00:00.000Z',
+      csrfToken: 'csrf-token',
       ttlMs: 60_000,
     });
     const session = await webAuth.getSession('session-token');
     assert.equal(Number.isFinite(session.expiresAt), true);
     assert.equal(session.passwordUpdatedAt, '2026-04-25T00:00:00.000Z');
+    assert.equal(session.csrfToken, 'csrf-token');
 
     await webAuth.setLoginAttempt('client', {
       count: 2,
