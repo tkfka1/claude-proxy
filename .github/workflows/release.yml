@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish, for example v2.0.0
+        required: true
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -18,16 +24,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Ensure tag belongs to main
+        shell: bash
         run: |
-          git fetch origin main --depth=1
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+          set -euo pipefail
+          git fetch origin main:refs/remotes/origin/main --force
+          release_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          if ! git merge-base --is-ancestor "$release_sha" "origin/main"; then
             echo "::error::Release tags must point to a commit reachable from origin/main."
             exit 1
           fi
@@ -41,16 +52,20 @@ jobs:
 
       - name: Validate release version
         id: version
+        shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
           VERSION="${TAG#v}"
           PACKAGE_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          PACKAGE_NAME="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).name")"
           if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
             echo "::error::package.json version ($PACKAGE_VERSION) does not match release tag ($VERSION)."
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           if [[ "$VERSION" == *-* ]]; then
             echo "latest=false" >> "$GITHUB_OUTPUT"
           else
@@ -66,15 +81,27 @@ jobs:
       - name: Verify npm package contents
         run: npm run pack:dry-run
 
-      - name: Publish package to npm
-        if: ${{ env.NPM_TOKEN != '' }}
+      - name: Check npm publish status
+        id: npm_status
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm view "${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.version }}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.version.outputs.package_name }}@${{ steps.version.outputs.version }} is already published to npm."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish package to npm with NPM_TOKEN
+        if: ${{ steps.npm_status.outputs.published != 'true' && env.NPM_TOKEN != '' }}
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
 
-      - name: Skip npm publish
-        if: ${{ env.NPM_TOKEN == '' }}
-        run: echo "NPM_TOKEN is not configured; skipping npm publish for this release."
+      - name: Publish package to npm with trusted publishing
+        if: ${{ steps.npm_status.outputs.published != 'true' && env.NPM_TOKEN == '' }}
+        run: npm publish --provenance
 
       - name: Decide container registries
         id: registries

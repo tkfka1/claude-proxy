@@ -406,7 +406,8 @@ make pm2-restart
   - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` 이 있으면 Docker Hub도 같이 push
 - `.github/workflows/release.yml`
   - 수동 fallback: `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
-  - `NPM_TOKEN` 이 있을 때만 npm 패키지 publish
+  - 이미 생성된 태그도 `workflow_dispatch` 의 `tag` 입력으로 다시 publish 가능
+  - `NPM_TOKEN` 이 있으면 token 기반 npm publish, 없으면 npm trusted publishing(OIDC) 시도
   - GitHub Release 생성
   - GHCR 멀티아키 이미지(`linux/amd64`, `linux/arm64`) push
   - 선택적으로 Docker Hub도 같이 push
@@ -428,18 +429,27 @@ make pm2-restart
 - 그 외는 patch
 
 수동 태그 릴리즈도 fallback으로 남겨 두었습니다. 직접 태그를 push하면 `release.yml` 이 실행됩니다.
+이미 태그가 만들어진 뒤 npm publish 인증만 보강한 경우에는 `release.yml` 을 수동 실행하고
+`tag` 에 예를 들어 `v2.0.0` 을 입력하면 같은 태그를 다시 검증한 뒤 npm/GitHub Release/컨테이너 publish를 재시도합니다.
 
 ### npm publish 인증
 
-기본 동작은 **npm optional** 입니다.
+기본 자동 릴리즈 경로(`auto-release.yml`)는 **npm optional** 입니다.
 
-- `NPM_TOKEN` secret 이 있으면 release workflow 에서 npm publish 수행
-- `NPM_TOKEN` 이 없으면 npm publish 는 자동으로 skip 되고, GitHub Release + 컨테이너 릴리즈만 진행
+- `NPM_TOKEN` secret 이 있으면 auto release workflow 에서 npm publish 수행
+- `NPM_TOKEN` 이 없으면 auto release 는 npm publish 를 skip 하고, GitHub Release + 컨테이너 릴리즈만 진행
 
-최초 npm 배포가 아직 없는 패키지는 trusted publishing 만으로 바로 시작할 수 없습니다.
+수동 fallback(`release.yml`)은 npm publish 를 더 강하게 검증합니다.
 
-- npm trusted publishing 설정 전에는 token 기반 첫 배포가 필요할 수 있음
-- workflow 파일명은 **정확히** `.github/workflows/release.yml` 이어야 함
+- 대상 버전이 이미 npm에 있으면 npm publish 를 건너뜀
+- `NPM_TOKEN` secret 이 있으면 token 기반 publish 사용
+- `NPM_TOKEN` 이 없으면 npm trusted publishing(OIDC) 으로 publish 시도
+
+Trusted publishing 을 쓰려면 npm에 trusted publisher를 설정해야 합니다.
+
+- package: `claude-anthropic-proxy`
+- GitHub owner/repo: `tkfka1/claude-proxy`
+- workflow filename: `release.yml`
 - `package.json` 의 `repository.url` 이 GitHub 저장소와 정확히 일치해야 함
 
 토큰 방식 fallback 도 지원합니다.
@@ -453,7 +463,7 @@ make pm2-restart
 - `ghcr.io/tkfka1/claude-proxy`
   - `:main` , 최신 `main` 브랜치 성공 빌드
   - `:sha-<7자리>` , 특정 커밋 고정용 edge 이미지
-  - `:latest`, `:1.1.0`, `:1.1`, `:sha-...` 는 공식 release 태그 push 때 생성
+  - `:latest`, `:2.0.0`, `:2.0`, `:sha-...` 는 공식 release 태그 push 때 생성
 
 선택 push 대상:
 
