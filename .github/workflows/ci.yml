@@ -11,6 +11,16 @@ jobs:
   node:
     name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +43,8 @@ jobs:
 
       - name: Run tests
         run: npm test
+        env:
+          REDIS_INTEGRATION_URL: redis://127.0.0.1:6379/0
 
       - name: Verify npm package contents
         run: npm run pack:dry-run

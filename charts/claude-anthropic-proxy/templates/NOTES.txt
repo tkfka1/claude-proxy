@@ -29,8 +29,12 @@
   A bootstrap PROXY_API_KEY is configured for the pod.
 {{- else if .Values.redis.enabled }}
   No bootstrap PROXY_API_KEY is configured. Sign in to /docs once, save the first x-api-key, and Redis will keep it across restarts.
+{{- else if hasKey .Values.env "REDIS_URL" }}
+  No bootstrap PROXY_API_KEY is configured. Sign in to /docs once, save the first x-api-key, and the external Redis backend will keep it across restarts.
+{{- else if .Values.redis.external.existingSecret }}
+  No bootstrap PROXY_API_KEY is configured. Sign in to /docs once, save the first x-api-key, and the external Redis backend from secret {{ .Values.redis.external.existingSecret }} will keep it across restarts.
 {{- else if not (eq (printf "%v" (index .Values.env "ALLOW_MISSING_API_KEY_HEADER")) "true") }}
-  /v1/messages stays locked until you sign in to /docs and save the first x-api-key.
+  /v1/messages stays locked, and the pod requires REDIS_URL. Enable internal Redis or set env.REDIS_URL.
 {{- else }}
-  /v1/messages currently allows requests without a configured x-api-key.
+  /v1/messages currently allows requests without a configured x-api-key, but the pod still requires REDIS_URL.
 {{- end }}

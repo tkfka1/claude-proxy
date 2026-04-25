@@ -30,6 +30,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       serviceAccountName: {{ include "claude-anthropic-proxy.serviceAccountName" . }}
       {{- if or .Values.proxyState.persistence.enabled .Values.podSecurityContext }}
       securityContext:
@@ -56,6 +59,12 @@ spec:
             {{- if and .Values.redis.enabled (not (hasKey .Values.env "REDIS_URL")) }}
             - name: REDIS_URL
               value: {{ printf "redis://%s:%v/0" (include "claude-anthropic-proxy.redisFullname" .) .Values.redis.service.port | quote }}
+            {{- else if and (not .Values.redis.enabled) .Values.redis.external.existingSecret (not (hasKey .Values.env "REDIS_URL")) }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.external.existingSecret }}
+                  key: {{ .Values.redis.external.existingSecretKey }}
             {{- end }}
             {{- if and .Values.redis.enabled (not (hasKey .Values.env "REDIS_KEY_PREFIX")) }}
             - name: REDIS_KEY_PREFIX
