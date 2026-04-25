@@ -75,3 +75,6 @@ redis:
 
 claudeAuth:
   existingSecret: claude-auth
+  persistence:
+    enabled: true
+    size: 1Gi

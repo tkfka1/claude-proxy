@@ -680,6 +680,51 @@ test('POST /proxy-api-key reset rotates the runtime key with previous-key grace'
   assert.ok(metricsBody.proxyApiKey.previousKeyMatches >= 1);
 });
 
+test('GET /v1/models enforces the configured x-api-key without requiring anthropic-version', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  await proxyApiKeyManager.resetApiKey('runtime-secret-key');
+
+  const missingHeaderResponse = await fetch(`${baseUrl}/v1/models`);
+  assert.equal(missingHeaderResponse.status, 401);
+  const missingHeaderBody = await missingHeaderResponse.json();
+  assert.equal(missingHeaderBody.error.message, 'x-api-key header is required');
+
+  const invalidKeyResponse = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      'x-api-key': 'definitely-invalid-key',
+    },
+  });
+  assert.equal(invalidKeyResponse.status, 401);
+  const invalidKeyBody = await invalidKeyResponse.json();
+  assert.equal(invalidKeyBody.error.message, 'Invalid API key');
+
+  const okResponse = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      'x-api-key': 'runtime-secret-key',
+    },
+  });
+  assert.equal(okResponse.status, 200);
+  assert.match(okResponse.headers.get('request-id') || '', /^req_/);
+  const okBody = await okResponse.json();
+  assert.deepEqual(okBody.data.map((model) => model.id), ['sonnet', 'opus', 'haiku']);
+});
+
+test('GET /v1/models stays locked until x-api-key is configured when missing headers are disallowed', async () => {
+  config.allowMissingApiKeyHeader = false;
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const response = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      'x-api-key': 'anything-at-all',
+    },
+  });
+
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error.type, 'api_error');
+  assert.match(body.error.message, /x-api-key is not configured yet/);
+});
+
 test('GET /logs/recent returns recent entries and concurrency status for docs-authenticated users', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
@@ -1177,6 +1222,34 @@ test('backend auth failure is surfaced as authentication_error', async () => {
   const body = await response.json();
   assert.equal(body.error.type, 'authentication_error');
 });
+
+test('backend auth failure in stream mode emits only an SSE authentication error', async () => {
+  process.env.MOCK_CLAUDE_ERROR = 'auth';
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      stream: true,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  delete process.env.MOCK_CLAUDE_ERROR;
+
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.match(text, /event: error/);
+  assert.match(text, /authentication_error/);
+  assert.doesNotMatch(text, /event: content_block_delta/);
+  assert.doesNotMatch(text, /event: message_stop/);
+});
+
 test('POST /v1/messages rejects tools payloads', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
 

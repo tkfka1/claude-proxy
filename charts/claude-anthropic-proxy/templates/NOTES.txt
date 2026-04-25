@@ -20,6 +20,16 @@
 2. Claude auth secret:
 {{- if include "claude-anthropic-proxy.hasClaudeAuth" . }}
   Mounted from secret: {{ include "claude-anthropic-proxy.authSecretName" . }}
+{{- if .Values.claudeAuth.writable }}
+  Runtime path is writable and seeded from the secret.
+{{- if .Values.claudeAuth.persistence.enabled }}
+  Writable auth files persist in PVC: {{ include "claude-anthropic-proxy.claudeAuthClaimName" . }}
+{{- else }}
+  Writable auth files use emptyDir and reset on pod recreation.
+{{- end }}
+{{- else }}
+  Runtime path is a read-only Secret mount.
+{{- end }}
 {{- else }}
   No Claude auth secret configured. The pod will likely fail to authenticate unless your image supplies credentials another way.
 {{- end }}

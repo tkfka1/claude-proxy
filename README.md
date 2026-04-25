@@ -286,6 +286,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `Claude.ai` / `Anthropic Console` 선택 가능, 필요하면 SSO 강제 가능
 - 로그인 명령 출력에서 URL이 감지되면 웹 화면에 바로 링크로 표시
 - 원격 서버에 띄운 경우 브라우저가 **서버 쪽 환경**에서 열릴 수 있으니 주의
+- Helm 기본값은 Claude auth Secret을 writable runtime volume으로 복사합니다. `values-prod.yaml` 은 PVC를 켜서 CLI token refresh와 웹 로그인 결과가 Pod 재시작 후에도 남게 합니다.
 
 ### Claude CLI 설정
 
@@ -321,7 +322,7 @@ PROXY_API_KEY=local-proxy-key
 ALLOW_MISSING_API_KEY_HEADER=false
 ```
 
-또는 서버를 띄운 뒤 `/docs` 에서 `x-api-key` 를 저장하면, 그 시점부터 `/v1/messages` 는
+또는 서버를 띄운 뒤 `/docs` 에서 `x-api-key` 를 저장하면, 그 시점부터 `/v1/messages` 와 `/v1/models` 는
 헤더 없이는 들어오지 않고, 저장된 값은 Redis에 남아 재시작 후에도 유지됩니다.
 
 요청 예시:
@@ -774,7 +775,7 @@ Anthropic 스타일 에러 형식으로 응답합니다.
   "type": "error",
   "error": {
     "type": "authentication_error",
-    "message": "claude-cli is not logged in. Run `claude auth login` first."
+    "message": "claude-cli authentication failed. Re-authenticate Claude in /docs, then retry."
   },
   "request_id": "req_..."
 }

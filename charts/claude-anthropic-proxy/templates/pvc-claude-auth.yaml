@@ -1,0 +1,21 @@
+{{- if and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable .Values.claudeAuth.persistence.enabled (not .Values.claudeAuth.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "claude-anthropic-proxy.claudeAuthClaimName" . }}
+  labels:
+    {{- include "claude-anthropic-proxy.labels" . | nindent 4 }}
+  {{- with .Values.claudeAuth.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.claudeAuth.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.claudeAuth.persistence.size }}
+  {{- with .Values.claudeAuth.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

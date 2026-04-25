@@ -152,12 +152,23 @@ proxyApiKey:
 claudeAuth:
   existingSecret: ""
   mountPath: /home/node/.claude
+  writable: true
+  seedMountPath: /tmp/claude-auth-seed
+  seedPolicy: ifEmpty
   defaultMode: 420
   items:
     - key: credentials.json
       path: .credentials.json
     - key: settings.json
       path: settings.json
+  persistence:
+    enabled: false
+    existingClaim: ""
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
   createSecret: false
   inline:
     credentialsJson: ""

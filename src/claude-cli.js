@@ -45,9 +45,22 @@ function buildArgs({ model, systemPrompt, stream, extraArgs = [] }) {
   return args;
 }
 
+function isCliAuthError(message, raw) {
+  const rawStatus = raw && typeof raw === 'object' ? raw.api_error_status : undefined;
+  const rawError = raw && typeof raw === 'object' ? raw.error : undefined;
+  const text = [
+    message,
+    rawStatus,
+    rawError,
+    raw && typeof raw === 'object' ? raw.result : undefined,
+  ].filter((part) => part != null).join(' ');
+
+  return /not logged in|failed to authenticate|invalid authentication credentials|authentication_error|authentication_failed|api error:\s*401|\b401\b/i.test(text);
+}
+
 function createCliError(message, raw = undefined) {
-  if (typeof message === 'string' && /not logged in/i.test(message)) {
-    return new ProxyError(401, 'authentication_error', 'claude-cli is not logged in. Run `claude auth login` first.', raw);
+  if (isCliAuthError(message, raw)) {
+    return new ProxyError(401, 'authentication_error', 'claude-cli authentication failed. Re-authenticate Claude in /docs, then retry.', raw);
   }
 
   return new ProxyError(500, 'api_error', message || 'claude-cli invocation failed', raw);
@@ -237,7 +250,13 @@ export function runClaudeStream({
 
     refreshIdleTimer();
 
-    if (event.type === 'assistant' && !event.parent_tool_use_id && !event.isSynthetic && !event.isReplay) {
+    if (
+      event.type === 'assistant'
+      && !event.parent_tool_use_id
+      && !event.isSynthetic
+      && !event.isReplay
+      && !event.error
+    ) {
       const fullText = extractAssistantText(event.message?.content);
       latestFullText = fullText;
       latestUsage = normalizeUsage(event.message?.usage || latestUsage);
@@ -282,6 +301,11 @@ export function runClaudeStream({
 
     if (finalResult?.is_error) {
       onError(createCliError(finalResult.result || stderrText || 'claude-cli returned an error result', finalResult));
+      return;
+    }
+
+    if (code !== 0) {
+      onError(createCliError(stderrText || `claude-cli exited with code ${code}`));
       return;
     }
 

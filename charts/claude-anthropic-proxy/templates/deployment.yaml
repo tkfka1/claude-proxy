@@ -1,5 +1,9 @@
-{{- if and .Values.proxyState.persistence.enabled (not .Values.proxyState.persistence.allowSharedState) (or (and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) 1)) (and (not .Values.autoscaling.enabled) (gt (int .Values.replicaCount) 1))) }}
+{{- $multiReplica := or (and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) 1)) (and (not .Values.autoscaling.enabled) (gt (int .Values.replicaCount) 1)) }}
+{{- if and .Values.proxyState.persistence.enabled (not .Values.proxyState.persistence.allowSharedState) $multiReplica }}
 {{- fail "proxyState.persistence.enabled requires a single replica unless proxyState.persistence.allowSharedState=true" }}
+{{- end }}
+{{- if and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable .Values.claudeAuth.persistence.enabled $multiReplica }}
+{{- fail "claudeAuth.persistence.enabled requires a single replica because Claude CLI auth files are writable state" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -34,14 +38,45 @@ spec:
       terminationGracePeriodSeconds: {{ . }}
       {{- end }}
       serviceAccountName: {{ include "claude-anthropic-proxy.serviceAccountName" . }}
-      {{- if or .Values.proxyState.persistence.enabled .Values.podSecurityContext }}
+      {{- if or .Values.proxyState.persistence.enabled (and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable) .Values.podSecurityContext }}
       securityContext:
-        {{- if and .Values.proxyState.persistence.enabled (not (hasKey .Values.podSecurityContext "fsGroup")) }}
+        {{- if and (or .Values.proxyState.persistence.enabled (and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable)) (not (hasKey .Values.podSecurityContext "fsGroup")) }}
         fsGroup: 1000
         {{- end }}
         {{- with .Values.podSecurityContext }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
+      {{- if and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable }}
+      initContainers:
+        - name: seed-claude-auth
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              target={{ .Values.claudeAuth.mountPath | quote }}
+              seed={{ .Values.claudeAuth.seedMountPath | quote }}
+              policy={{ default "ifEmpty" .Values.claudeAuth.seedPolicy | quote }}
+              mkdir -p "$target"
+              if [ "$policy" = "always" ] || [ ! -s "$target/.credentials.json" ]; then
+                cp -a "$seed"/. "$target"/
+              else
+                [ -f "$target/settings.json" ] || cp -a "$seed/settings.json" "$target/settings.json" 2>/dev/null || true
+              fi
+              chmod -R u+rwX,go-rwx "$target" || true
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: claude-auth-seed
+              mountPath: {{ .Values.claudeAuth.seedMountPath }}
+              readOnly: true
+            - name: claude-auth
+              mountPath: {{ .Values.claudeAuth.mountPath }}
       {{- end }}
       containers:
         - name: {{ include "claude-anthropic-proxy.name" . }}
@@ -116,7 +151,9 @@ spec:
             {{- if include "claude-anthropic-proxy.hasClaudeAuth" . }}
             - name: claude-auth
               mountPath: {{ .Values.claudeAuth.mountPath }}
+              {{- if not .Values.claudeAuth.writable }}
               readOnly: true
+              {{- end }}
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -130,6 +167,23 @@ spec:
             claimName: {{ include "claude-anthropic-proxy.proxyStateClaimName" . }}
         {{- end }}
         {{- if include "claude-anthropic-proxy.hasClaudeAuth" . }}
+        {{- if .Values.claudeAuth.writable }}
+        - name: claude-auth-seed
+          secret:
+            secretName: {{ include "claude-anthropic-proxy.authSecretName" . }}
+            defaultMode: {{ .Values.claudeAuth.defaultMode }}
+            {{- with .Values.claudeAuth.items }}
+            items:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - name: claude-auth
+          {{- if .Values.claudeAuth.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "claude-anthropic-proxy.claudeAuthClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- else }}
         - name: claude-auth
           secret:
             secretName: {{ include "claude-anthropic-proxy.authSecretName" . }}
@@ -138,6 +192,7 @@ spec:
             items:
               {{- toYaml . | nindent 14 }}
             {{- end }}
+        {{- end }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

@@ -1065,12 +1065,12 @@ async function handleRecentLogsClear(req, res) {
   });
 }
 
-function applyProxyAuth(req, requestId) {
+function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
   const configuredProxyApiKey = proxyApiKeyManager.getApiKey();
 
-  if (config.requireAnthropicVersion && !anthropicVersion) {
+  if (requireAnthropicVersion && !anthropicVersion) {
     throw new ProxyError(400, 'invalid_request_error', 'anthropic-version header is required');
   }
 
@@ -1078,7 +1078,7 @@ function applyProxyAuth(req, requestId) {
     throw new ProxyError(
       503,
       'api_error',
-      'x-api-key is not configured yet. Sign in to /docs and set it before using /v1/messages.',
+      'x-api-key is not configured yet. Sign in to /docs and set it before using the proxy API.',
     );
   }
 
@@ -1116,7 +1116,7 @@ function applyProxyAuth(req, requestId) {
   };
 }
 
-function sendModels(res) {
+function sendModels(res, requestId) {
   json(res, 200, {
     data: [
       {
@@ -1138,7 +1138,21 @@ function sendModels(res) {
     has_more: false,
     first_id: 'sonnet',
     last_id: 'haiku',
+  }, {
+    'request-id': requestId,
   });
+}
+
+function handleModels(req, res) {
+  const requestId = createRequestId();
+
+  try {
+    applyProxyAuth(req, requestId, { requireAnthropicVersion: false });
+    sendModels(res, requestId);
+  } catch (error) {
+    sendProxyError(res, error, requestId);
+    log('models request failed', { requestId, error: error.message }, 'warn');
+  }
 }
 
 async function handleMessages(req, res) {
@@ -1579,7 +1593,7 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'GET' && req.url === '/v1/models') {
-    sendModels(res);
+    handleModels(req, res);
     return;
   }
 

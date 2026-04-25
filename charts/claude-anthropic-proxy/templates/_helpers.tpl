@@ -59,6 +59,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{- define "claude-anthropic-proxy.claudeAuthClaimName" -}}
+{{- if .Values.claudeAuth.persistence.existingClaim }}
+{{- .Values.claudeAuth.persistence.existingClaim }}
+{{- else }}
+{{- printf "%s-claude-auth" (include "claude-anthropic-proxy.fullname" .) }}
+{{- end }}
+{{- end }}
+
 {{- define "claude-anthropic-proxy.redisFullname" -}}
 {{- printf "%s-redis" (include "claude-anthropic-proxy.fullname" .) }}
 {{- end }}

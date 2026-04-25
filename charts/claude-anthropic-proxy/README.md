@@ -87,6 +87,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 ```
 
 기본 설치는 내부 Redis를 같이 띄웁니다. 프록시 Pod에는 내부 Redis 주소가 `REDIS_URL` 로 자동 주입됩니다.
+`values-prod.yaml` 은 Claude auth Secret을 writable PVC로 seed합니다. 그래서 Claude CLI token refresh와 `/docs` 웹 로그인 결과가 Pod 재시작 후에도 유지됩니다.
 
 외부 Redis를 쓰려면 내부 Redis를 끄고 `env.REDIS_URL` 을 지정합니다.
 
@@ -204,6 +205,8 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `claudeAuth.existingSecret`
 - `claudeAuth.createSecret`
 - `claudeAuth.mountPath`
+- `claudeAuth.writable`, `claudeAuth.seedPolicy`
+- `claudeAuth.persistence.*`
 
 ## values 파일 예시
 
@@ -234,6 +237,9 @@ service:
 
 claudeAuth:
   existingSecret: claude-auth
+  persistence:
+    enabled: true
+    size: 1Gi
 
 ingress:
   enabled: true
