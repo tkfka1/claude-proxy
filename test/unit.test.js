@@ -563,6 +563,38 @@ test('claude auth snapshots copy and replace auth files safely', async () => {
     }),
     /Invalid Claude auth snapshot file path/,
   );
+  assert.throws(
+    () => normalizeClaudeAuthSnapshot({
+      version: 1,
+      updatedAt: '2026-04-25T00:00:00.000Z',
+      files: [{ path: '..2026_04_25_00_00_00/.credentials.json', contentBase64: '' }],
+    }),
+    /Invalid Claude auth snapshot file path/,
+  );
+
+  const secretDir = path.join(tempDir, 'secret-volume');
+  const revisionDir = path.join(secretDir, '..2026_04_25_00_00_00.000000000');
+  fs.mkdirSync(revisionDir, { recursive: true });
+  fs.writeFileSync(path.join(revisionDir, '.credentials.json'), '{"token":"secret-volume"}', {
+    mode: 0o600,
+  });
+  fs.writeFileSync(path.join(revisionDir, 'settings.json'), '{"theme":"light"}', { mode: 0o600 });
+  fs.symlinkSync(path.basename(revisionDir), path.join(secretDir, '..data'), 'dir');
+  fs.symlinkSync('..data/.credentials.json', path.join(secretDir, '.credentials.json'));
+  fs.symlinkSync('..data/settings.json', path.join(secretDir, 'settings.json'));
+
+  const secretSnapshot = await readClaudeAuthSnapshot({
+    authDir: secretDir,
+    updatedAt: '2026-04-25T00:02:00.000Z',
+  });
+  assert.deepEqual(secretSnapshot.files.map((file) => file.path), [
+    '.credentials.json',
+    'settings.json',
+  ]);
+  assert.equal(
+    secretSnapshot.files[0].contentBase64,
+    Buffer.from('{"token":"secret-volume"}').toString('base64'),
+  );
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
@@ -603,6 +635,50 @@ test('claude auth manager applies shared snapshots without exposing auth dir sta
   assert.deepEqual(manager.getSharedAuthStatus(), {
     enabled: true,
     lastAppliedAt: '2026-04-25T02:00:00.000Z',
+  });
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('claude auth manager replaces invalid shared snapshots from local seed files', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-seed-'));
+  const authDir = path.join(tempDir, '.claude');
+  fs.mkdirSync(authDir, { recursive: true });
+  fs.writeFileSync(path.join(authDir, '.credentials.json'), '{"token":"local"}', { mode: 0o600 });
+
+  const authStore = {
+    state: {
+      version: 1,
+      updatedAt: '2026-04-25T01:00:00.000Z',
+      files: [
+        {
+          path: '..2026_04_25_00_00_00/.credentials.json',
+          contentBase64: Buffer.from('{"token":"bad"}').toString('base64'),
+          mode: 0o600,
+        },
+      ],
+    },
+    async loadState() {
+      return this.state;
+    },
+    async saveState(state) {
+      this.state = normalizeClaudeAuthSnapshot(state);
+    },
+  };
+
+  const manager = createClaudeAuthManager({
+    claudeBin: process.execPath,
+    authDir,
+    authStore,
+  });
+  const seedResult = await manager.seedStoreFromLocalIfEmpty();
+
+  assert.equal(seedResult.seeded, true);
+  assert.equal(seedResult.replacedInvalid, true);
+  assert.deepEqual(authStore.state.files.map((file) => file.path), ['.credentials.json']);
+  assert.deepEqual(manager.getSharedAuthStatus(), {
+    enabled: true,
+    lastAppliedAt: authStore.state.updatedAt,
   });
 
   fs.rmSync(tempDir, { recursive: true, force: true });

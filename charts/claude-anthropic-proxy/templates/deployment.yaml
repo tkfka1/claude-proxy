@@ -66,9 +66,9 @@ spec:
               policy={{ default "ifEmpty" .Values.claudeAuth.seedPolicy | quote }}
               mkdir -p "$target"
               if [ "$policy" = "always" ] || [ ! -s "$target/.credentials.json" ]; then
-                cp -a "$seed"/. "$target"/
+                find "$seed" -mindepth 1 -maxdepth 1 ! -name '..*' -exec cp -RL {} "$target"/ \;
               else
-                [ -f "$target/settings.json" ] || cp -a "$seed/settings.json" "$target/settings.json" 2>/dev/null || true
+                [ -f "$target/settings.json" ] || cp -L "$seed/settings.json" "$target/settings.json" 2>/dev/null || true
               fi
               chmod -R u+rwX,go-rwx "$target" || true
           {{- with .Values.securityContext }}

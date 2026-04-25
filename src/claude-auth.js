@@ -50,16 +50,14 @@ function normalizeSnapshotFilePath(filePath) {
     throw new Error(`Invalid Claude auth snapshot file path: ${filePath}`);
   }
 
-  const parts = raw.split('/');
-  if (parts.includes('..')) {
+  const parts = raw
+    .split('/')
+    .filter((part) => part && part !== '.');
+  if (parts.some((part) => part === '..' || part.startsWith('..'))) {
     throw new Error(`Invalid Claude auth snapshot file path: ${filePath}`);
   }
 
-  const normalized = raw
-    .replaceAll('\\', '/')
-    .split('/')
-    .filter((part) => part && part !== '.')
-    .join('/');
+  const normalized = parts.join('/');
 
   if (!normalized) {
     throw new Error(`Invalid Claude auth snapshot file path: ${filePath}`);
@@ -98,6 +96,10 @@ async function collectAuthFiles(authDir, currentDir = authDir, files = []) {
   }
 
   for (const entry of entries) {
+    if (entry.name.startsWith('..')) {
+      continue;
+    }
+
     const absolutePath = path.join(currentDir, entry.name);
 
     if (entry.isDirectory()) {
@@ -105,11 +107,15 @@ async function collectAuthFiles(authDir, currentDir = authDir, files = []) {
       continue;
     }
 
-    if (!entry.isFile()) {
+    const stat = await fs.stat(absolutePath);
+    if (stat.isDirectory()) {
       continue;
     }
 
-    const stat = await fs.stat(absolutePath);
+    if (!stat.isFile()) {
+      continue;
+    }
+
     if (stat.size > MAX_AUTH_FILE_BYTES) {
       throw new Error(`Claude auth file exceeds ${MAX_AUTH_FILE_BYTES} bytes: ${path.relative(authDir, absolutePath)}`);
     }
@@ -396,10 +402,24 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
 
     const existing = await authStore.loadState();
     if (existing) {
+      try {
+        const normalized = normalizeClaudeAuthSnapshot(existing);
+        return {
+          enabled: true,
+          seeded: false,
+          ...summarizeSharedSnapshot(normalized),
+        };
+      } catch {
+        // Replace legacy/corrupt shared auth state with the local seeded auth files below.
+      }
+    }
+
+    if (existing && !(await pathExists(resolvedAuthDir))) {
       return {
         enabled: true,
         seeded: false,
-        ...summarizeSharedSnapshot(existing),
+        reason: 'auth-dir-missing',
+        replacedInvalid: true,
       };
     }
 
@@ -418,6 +438,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     return {
       enabled: true,
       seeded: true,
+      replacedInvalid: Boolean(existing),
       ...summarizeSharedSnapshot(snapshot),
     };
   }
