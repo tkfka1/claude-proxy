@@ -185,6 +185,9 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   const body = await response.text();
   assert.match(body, /Claude Proxy/);
   assert.match(body, /Login/);
+  assert.match(body, /class="proxy-visual"/);
+  assert.match(body, /class="hero-meta-grid"/);
+  assert.match(body, /class="node-card node-api"/);
   assert.doesNotMatch(body, /Claude를/);
   assert.doesNotMatch(body, /Private AI gateway/);
   assert.doesNotMatch(body, /WEB_PASSWORD/);

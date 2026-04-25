@@ -128,11 +128,37 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
       }
 
       .login-page .shell {
+        position: relative;
         width: 100%;
-        min-height: 640px;
+        min-height: 680px;
         display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(360px, 420px);
+        grid-template-columns: minmax(0, 1.15fr) minmax(360px, 430px);
         padding: 0;
+      }
+
+      .login-page .shell::before,
+      .login-page .shell::after {
+        content: "";
+        position: absolute;
+        pointer-events: none;
+        border-radius: 999px;
+        filter: blur(4px);
+        opacity: 0.72;
+      }
+
+      .login-page .shell::before {
+        inset: -140px auto auto -120px;
+        width: 360px;
+        height: 360px;
+        background: radial-gradient(circle, rgba(200, 245, 109, 0.18), transparent 68%);
+      }
+
+      .login-page .shell::after {
+        right: -120px;
+        bottom: -150px;
+        width: 420px;
+        height: 420px;
+        background: radial-gradient(circle, rgba(242, 179, 93, 0.14), transparent 66%);
       }
 
       .console-page .shell {
@@ -215,11 +241,32 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
 
       .login-hero {
         position: relative;
-        min-height: 640px;
+        z-index: 1;
+        min-height: 680px;
         padding: 52px;
+        display: grid;
+        align-content: space-between;
+        gap: 32px;
+        overflow: hidden;
         background:
-          linear-gradient(135deg, rgba(200, 245, 109, 0.08), transparent 36%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent);
+          radial-gradient(circle at 20% 18%, rgba(200, 245, 109, 0.16), transparent 30%),
+          radial-gradient(circle at 78% 72%, rgba(242, 179, 93, 0.12), transparent 28%),
+          linear-gradient(135deg, rgba(200, 245, 109, 0.08), transparent 38%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+      }
+
+      .login-hero::before {
+        content: "";
+        position: absolute;
+        inset: 28px;
+        border: 1px solid rgba(246, 241, 231, 0.075);
+        border-radius: 28px;
+        background-image:
+          linear-gradient(rgba(200, 245, 109, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(200, 245, 109, 0.08) 1px, transparent 1px);
+        background-size: 54px 54px;
+        mask-image: radial-gradient(circle at 48% 52%, black, transparent 74%);
+        opacity: 0.42;
       }
 
       .login-hero::after {
@@ -237,17 +284,159 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         opacity: 0.62;
       }
 
+      .login-hero > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .hero-copy {
+        display: grid;
+        gap: 18px;
+        margin-top: 24px;
+      }
+
+      .hero-badge,
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        gap: 8px;
+        border: 1px solid rgba(200, 245, 109, 0.22);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.24);
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .hero-badge { padding: 7px 12px; }
+
+      .status-chip { padding: 7px 10px; }
+
+      .pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 0 7px rgba(200, 245, 109, 0.12);
+      }
+
+      .hero-title {
+        margin: 0;
+        max-width: 620px;
+        font-size: clamp(3.8rem, 8vw, 7.2rem);
+      }
+
+      .proxy-visual {
+        position: relative;
+        min-height: 240px;
+        margin: 8px 0;
+      }
+
+      .orbit-ring {
+        position: absolute;
+        inset: 50% auto auto 50%;
+        border: 1px solid rgba(200, 245, 109, 0.18);
+        border-radius: 999px;
+        transform: translate(-50%, -50%) rotate(-10deg);
+      }
+
+      .ring-one {
+        width: min(520px, 72vw);
+        height: 166px;
+      }
+
+      .ring-two {
+        width: min(390px, 58vw);
+        height: 118px;
+        transform: translate(-50%, -50%) rotate(13deg);
+      }
+
+      .core-mark {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        display: grid;
+        place-items: center;
+        width: 104px;
+        height: 104px;
+        border: 1px solid rgba(200, 245, 109, 0.46);
+        border-radius: 32px;
+        background:
+          linear-gradient(180deg, rgba(200, 245, 109, 0.95), rgba(153, 213, 64, 0.95));
+        color: var(--accent-ink);
+        font-weight: 1000;
+        letter-spacing: -0.06em;
+        font-size: 1.55rem;
+        box-shadow: 0 22px 70px rgba(200, 245, 109, 0.24);
+        transform: translate(-50%, -50%) rotate(-6deg);
+      }
+
+      .node-card {
+        position: absolute;
+        min-width: 148px;
+        padding: 13px 14px;
+        border: 1px solid rgba(246, 241, 231, 0.12);
+        border-radius: 18px;
+        background: rgba(5, 8, 6, 0.72);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+      }
+
+      .node-card span,
+      .hero-meta-grid span {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--muted);
+        font-size: 0.68rem;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .node-card strong,
+      .hero-meta-grid strong {
+        font-size: 0.94rem;
+      }
+
+      .node-api { left: 0; top: 22px; }
+      .node-auth { right: 0; top: 66px; }
+      .node-logs { left: 18%; bottom: 8px; }
+
+      .hero-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .hero-meta-grid > div {
+        min-height: 86px;
+        padding: 15px;
+        border: 1px solid rgba(246, 241, 231, 0.1);
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.22);
+      }
+
       .login-card {
+        position: relative;
+        z-index: 1;
         display: grid;
         align-items: center;
         padding: 42px;
         border-left: 1px solid var(--line);
-        background: rgba(3, 5, 4, 0.44);
+        background:
+          radial-gradient(circle at 80% 20%, rgba(200, 245, 109, 0.08), transparent 28%),
+          rgba(3, 5, 4, 0.52);
       }
 
       .login-card-inner {
         display: grid;
-        gap: 16px;
+        gap: 18px;
+        padding: 26px;
+        border: 1px solid rgba(246, 241, 231, 0.1);
+        border-radius: 28px;
+        background: rgba(0, 0, 0, 0.16);
       }
 
       .lock-icon {
@@ -529,10 +718,18 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
           padding: 34px;
         }
 
+        .proxy-visual {
+          min-height: 220px;
+        }
+
         .login-card {
           border-left: 0;
           border-top: 1px solid var(--line);
           padding: 34px;
+        }
+
+        .hero-meta-grid {
+          grid-template-columns: 1fr;
         }
 
         .topbar { flex-direction: column; }
@@ -545,6 +742,12 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         .login-page .shell { border-radius: 24px; }
         .login-hero, .login-card { padding: 24px; }
         h1 { font-size: clamp(2.05rem, 12vw, 3.2rem); }
+        .hero-title { font-size: clamp(3rem, 17vw, 4.5rem); }
+        .proxy-visual { min-height: 260px; }
+        .node-card { min-width: 132px; }
+        .node-api { left: 0; top: 8px; }
+        .node-auth { right: 0; top: 106px; }
+        .node-logs { left: 0; bottom: 8px; }
         .split { grid-template-columns: 1fr; }
       }
     </style>
@@ -574,10 +777,27 @@ export function renderLoginPage({ errorMessage = '', loginPath = '/login' } = {}
           <span class="wordmark-mark">CP</span>
           <span>Claude Proxy</span>
         </div>
-        <h1 style="margin-top: 96px;">Claude Proxy</h1>
+        <div class="hero-copy">
+          <div class="hero-badge"><span class="pulse" aria-hidden="true"></span>Console</div>
+          <h1 class="hero-title">Claude Proxy</h1>
+        </div>
+        <div class="proxy-visual" aria-hidden="true">
+          <div class="orbit-ring ring-one"></div>
+          <div class="orbit-ring ring-two"></div>
+          <div class="core-mark">CP</div>
+          <div class="node-card node-api"><span>API</span><strong>/v1/messages</strong></div>
+          <div class="node-card node-auth"><span>Auth</span><strong>Protected</strong></div>
+          <div class="node-card node-logs"><span>Logs</span><strong>Live</strong></div>
+        </div>
+        <div class="hero-meta-grid" aria-hidden="true">
+          <div><span>Mode</span><strong>Proxy</strong></div>
+          <div><span>Access</span><strong>Login</strong></div>
+          <div><span>Status</span><strong>Ready</strong></div>
+        </div>
       </section>
       <aside class="login-card">
         <div class="login-card-inner">
+          <div class="status-chip"><span class="pulse" aria-hidden="true"></span>Secure</div>
           <div class="lock-icon" aria-hidden="true">⌁</div>
           <div>
             <h2>Login</h2>
