@@ -27,7 +27,7 @@ import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { createScryptPasswordHash, validateNewWebPassword, verifyWebPassword } from './web-auth.js';
-import { faviconSvg, renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
+import { faviconIco, faviconSvg, renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
 
 const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
@@ -545,6 +545,16 @@ function svg(res, status, body, extraHeaders = {}) {
     ...extraHeaders,
   });
   res.end(payload);
+}
+
+function binary(res, status, body, contentType, extraHeaders = {}) {
+  res.writeHead(status, {
+    'content-type': contentType,
+    'content-length': body.length,
+    'cache-control': 'public, max-age=86400',
+    ...extraHeaders,
+  });
+  res.end(body);
 }
 
 function jsonError(res, status, message, extra = {}) {
@@ -1615,8 +1625,13 @@ async function handleMessages(req, res) {
 function requestHandler(req, res) {
   recordRequest(req, res);
 
-  if (req.method === 'GET' && (req.url === '/favicon.svg' || req.url === '/favicon.ico')) {
+  if (req.method === 'GET' && req.url === '/favicon.svg') {
     svg(res, 200, faviconSvg);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/favicon.ico') {
+    binary(res, 200, faviconIco, 'image/x-icon');
     return;
   }
 

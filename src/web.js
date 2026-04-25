@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
+
 export const serviceMetadata = {
   ok: true,
   service: 'claude-anthropic-proxy',
   endpoints: ['/health', '/ready', '/metrics', '/v1/messages', '/v1/models'],
   docs_path: '/docs',
 };
+
+export const faviconIco = readFileSync(new URL('./assets/favicon.ico', import.meta.url));
 
 export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="18" fill="#070806"/>

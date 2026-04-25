@@ -207,7 +207,9 @@ test('GET /favicon serves the Claude Proxy icon without polluting recent logs', 
 
   const icoResponse = await fetch(`${baseUrl}/favicon.ico`);
   assert.equal(icoResponse.status, 200);
-  assert.match(icoResponse.headers.get('content-type') || '', /^image\/svg\+xml\b/);
+  assert.match(icoResponse.headers.get('content-type') || '', /^image\/x-icon\b/);
+  const icoMagic = Buffer.from(await icoResponse.arrayBuffer()).subarray(0, 4);
+  assert.deepEqual([...icoMagic], [0, 0, 1, 0]);
 
   const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
     headers: {
