@@ -179,9 +179,12 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.match(response.headers.get('content-type') || '', /^text\/html\b/);
   assert.equal(response.headers.get('vary'), 'Cookie');
   const body = await response.text();
-  assert.match(body, /문서 페이지 로그인/);
-  assert.match(body, /WEB_PASSWORD/);
-  assert.match(body, /WEB_PASSWORD_HASH/);
+  assert.match(body, /Claude Proxy/);
+  assert.match(body, /운영자 로그인/);
+  assert.match(body, /Private AI gateway/);
+  assert.doesNotMatch(body, /WEB_PASSWORD/);
+  assert.doesNotMatch(body, /WEB_PASSWORD_HASH/);
+  assert.doesNotMatch(body, /들어가면 보이는 것/);
 });
 
 test('POST /login creates a session and grants access to the docs page', async () => {
@@ -210,16 +213,15 @@ test('POST /login creates a session and grants access to the docs page', async (
 
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /엔드포인트/);
+  assert.match(body, /Control room/);
+  assert.match(body, /Routes/);
   assert.match(body, /POST/);
   assert.match(body, /\/v1\/messages/);
-  assert.match(body, /일반 메시지 요청/);
-  assert.match(body, /Claude CLI 로그인/);
-  assert.match(body, /\/claude-auth\/status/);
+  assert.match(body, /Message/);
+  assert.match(body, /Claude session/);
   assert.match(body, /SSO 강제 사용/);
-  assert.match(body, /x-api-key 저장/);
-  assert.match(body, /리셋/);
-  assert.match(body, /\/proxy-api-key/);
+  assert.match(body, /키 저장/);
+  assert.match(body, /새 키 발급/);
   assert.match(body, /로그 검색/);
   assert.match(body, /JSON 저장/);
   assert.match(body, /로그 비우기/);
@@ -303,7 +305,7 @@ test('POST /logout clears the docs session', async () => {
 
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /문서 페이지 로그인/);
+  assert.match(body, /운영자 로그인/);
 });
 
 test('GET /api-info returns service metadata JSON', async () => {

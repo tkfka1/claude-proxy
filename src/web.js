@@ -14,7 +14,11 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function renderLayout({ title, eyebrow, body }) {
+function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
+  const eyebrowBlock = eyebrow
+    ? `<div class="eyebrow">${escapeHtml(eyebrow)}</div>`
+    : '';
+
   return `<!doctype html>
 <html lang="ko">
   <head>
@@ -24,120 +28,334 @@ function renderLayout({ title, eyebrow, body }) {
     <style>
       :root {
         color-scheme: dark;
-        --bg: #09101f;
-        --panel: rgba(18, 25, 51, 0.94);
-        --text: #ebf0ff;
-        --muted: #94a3b8;
-        --line: rgba(148, 163, 184, 0.2);
-        --accent: #60a5fa;
-        --danger: #f87171;
+        --bg: #070806;
+        --bg-soft: #0d120e;
+        --panel: rgba(18, 23, 19, 0.78);
+        --panel-strong: rgba(25, 31, 26, 0.92);
+        --panel-soft: rgba(255, 255, 255, 0.045);
+        --text: #f6f1e7;
+        --muted: #a8b0a6;
+        --line: rgba(246, 241, 231, 0.13);
+        --line-strong: rgba(246, 241, 231, 0.24);
+        --accent: #c8f56d;
+        --accent-ink: #18210d;
+        --amber: #f2b35d;
+        --danger: #ff7a70;
+        --warn: #f6c65f;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
       }
 
       * { box-sizing: border-box; }
 
+      html { min-height: 100%; }
+
       body {
+        min-height: 100vh;
         margin: 0;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
         color: var(--text);
         background:
-          radial-gradient(circle at top, rgba(59, 130, 246, 0.18), transparent 32%),
-          linear-gradient(180deg, #050913 0%, var(--bg) 100%);
+          radial-gradient(circle at 18% 12%, rgba(200, 245, 109, 0.15), transparent 26rem),
+          radial-gradient(circle at 88% 8%, rgba(242, 179, 93, 0.13), transparent 22rem),
+          linear-gradient(145deg, #050604 0%, #0c100d 54%, #11170f 100%);
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(246, 241, 231, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(246, 241, 231, 0.035) 1px, transparent 1px);
+        background-size: 44px 44px;
+        mask-image: linear-gradient(to bottom, black 0%, transparent 78%);
       }
 
       main {
-        width: min(1120px, calc(100vw - 32px));
+        position: relative;
+        z-index: 1;
+        width: min(1180px, calc(100vw - 32px));
         margin: 0 auto;
-        padding: 48px 0 80px;
+        padding: 40px 0 72px;
+      }
+
+      .login-page main {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px 0;
       }
 
       .shell,
-      .panel {
+      .panel,
+      .stat-card {
         border: 1px solid var(--line);
-        border-radius: 22px;
-        background: var(--panel);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.26);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035));
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
       }
 
       .shell {
+        overflow: hidden;
+        border-radius: 32px;
         padding: 32px;
-        margin-bottom: 22px;
+      }
+
+      .login-page .shell {
+        width: 100%;
+        min-height: 640px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(360px, 420px);
+        padding: 0;
+      }
+
+      .console-page .shell {
+        display: grid;
+        gap: 20px;
+      }
+
+      .eyebrow,
+      .pill,
+      .method,
+      .inline-code,
+      .log-chip {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.24);
       }
 
       .eyebrow {
-        display: inline-flex;
-        align-items: center;
         gap: 8px;
-        padding: 6px 12px;
-        border-radius: 999px;
-        font-size: 13px;
-        color: #bfdbfe;
-        background: rgba(96, 165, 250, 0.14);
-        margin-bottom: 16px;
+        padding: 6px 11px;
+        margin-bottom: 18px;
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
 
       h1, h2, h3, p { margin-top: 0; }
 
       h1 {
-        font-size: clamp(2rem, 4vw, 3.1rem);
+        max-width: 820px;
         margin-bottom: 12px;
+        font-size: clamp(2.3rem, 5vw, 5rem);
+        line-height: 0.96;
+        letter-spacing: -0.07em;
+        text-wrap: balance;
+        word-break: keep-all;
       }
 
       h2 {
-        font-size: 1.3rem;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
+        font-size: 1.05rem;
+        letter-spacing: -0.02em;
       }
 
       p, li {
-        line-height: 1.6;
+        line-height: 1.58;
+        word-break: keep-all;
       }
 
+      a { color: var(--accent); }
+
       .lede {
-        max-width: 840px;
-        color: #dbe4ff;
+        max-width: 680px;
         margin-bottom: 0;
+        color: #d9ded1;
+        font-size: 1.04rem;
+      }
+
+      .muted { color: var(--muted); }
+
+      .wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--text);
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .wordmark-mark {
+        display: inline-grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border: 1px solid rgba(200, 245, 109, 0.42);
+        border-radius: 14px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-size: 0.82rem;
+        box-shadow: 0 0 34px rgba(200, 245, 109, 0.24);
+      }
+
+      .login-hero {
+        position: relative;
+        min-height: 640px;
+        padding: 52px;
+        background:
+          linear-gradient(135deg, rgba(200, 245, 109, 0.08), transparent 36%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent);
+      }
+
+      .login-hero::after {
+        content: "";
+        position: absolute;
+        right: 42px;
+        bottom: 36px;
+        width: min(46vw, 500px);
+        height: 180px;
+        border: 1px solid rgba(200, 245, 109, 0.16);
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(200, 245, 109, 0.15), transparent 62%);
+        filter: blur(2px);
+        transform: rotate(-12deg);
+        opacity: 0.62;
+      }
+
+      .hero-kicker {
+        margin: 90px 0 14px;
+        color: var(--amber);
+        font-size: 0.8rem;
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .login-copy {
+        max-width: 600px;
+        color: #d9ded1;
+        font-size: 1.18rem;
+      }
+
+      .login-signal {
+        position: absolute;
+        left: 52px;
+        right: 52px;
+        bottom: 46px;
+        z-index: 1;
+        display: grid;
+        gap: 10px;
+        max-width: 560px;
+      }
+
+      .signal-line {
+        display: grid;
+        grid-template-columns: 10px 120px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 14px;
+        border: 1px solid rgba(246, 241, 231, 0.1);
+        border-radius: 16px;
+        background: rgba(0, 0, 0, 0.28);
+        color: #d9ded1;
+      }
+
+      .signal-line span {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 18px rgba(200, 245, 109, 0.7);
+      }
+
+      .signal-line strong { font-size: 0.86rem; }
+      .signal-line em {
+        color: var(--muted);
+        font-style: normal;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .login-card {
+        display: grid;
+        align-items: center;
+        padding: 42px;
+        border-left: 1px solid var(--line);
+        background: rgba(3, 5, 4, 0.44);
+      }
+
+      .login-card-inner {
+        display: grid;
+        gap: 16px;
+      }
+
+      .lock-icon {
+        display: grid;
+        place-items: center;
+        width: 54px;
+        height: 54px;
+        border: 1px solid var(--line-strong);
+        border-radius: 18px;
+        color: var(--accent);
+        background: rgba(200, 245, 109, 0.08);
+        font-size: 1.3rem;
+      }
+
+      .login-footnote {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 0.88rem;
       }
 
       .grid,
-      .split {
+      .split,
+      .stats-grid {
         display: grid;
-        gap: 20px;
+        gap: 16px;
       }
 
-      .grid {
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      .grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+      .split { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+      .stats-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+
+      .panel,
+      .stat-card {
+        border-radius: 24px;
+        padding: 22px;
       }
 
-      .split {
-        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      .stat-card {
+        min-height: 118px;
+        display: grid;
+        align-content: space-between;
       }
 
-      .panel {
-        padding: 24px;
-      }
-
-      .muted {
+      .stat-card span {
         color: var(--muted);
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .stat-card strong {
+        font-size: 1.15rem;
+        word-break: break-word;
       }
 
       .inline-code,
       .method {
-        display: inline-block;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-        font-size: 0.9rem;
-        padding: 5px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        background: rgba(8, 12, 28, 0.9);
+        font-size: 0.85rem;
+        padding: 4px 9px;
       }
 
-      .endpoint-list {
-        display: grid;
-        gap: 12px;
-        list-style: none;
-        padding: 0;
-        margin: 0;
+      .method {
+        color: var(--accent);
+        border-color: rgba(200, 245, 109, 0.24);
       }
 
+      .endpoint-list,
       .link-list {
         display: grid;
         gap: 10px;
@@ -146,77 +364,83 @@ function renderLayout({ title, eyebrow, body }) {
         margin: 0;
       }
 
-      .link-list a {
-        color: #bfdbfe;
-        word-break: break-all;
+      .endpoint-list.compact {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       }
 
       .endpoint-list li {
+        display: grid;
+        gap: 8px;
         border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 14px 16px;
-        background: rgba(8, 12, 28, 0.55);
+        border-radius: 18px;
+        padding: 14px;
+        background: rgba(0, 0, 0, 0.2);
       }
 
       .endpoint-path {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-        font-size: 0.95rem;
+        font-size: 0.94rem;
       }
 
-      form {
-        display: grid;
-        gap: 14px;
-      }
+      form { display: grid; gap: 14px; }
 
       label {
         display: grid;
         gap: 8px;
-        font-size: 14px;
+        color: #dfe5d8;
+        font-size: 0.9rem;
+        font-weight: 700;
       }
 
       input,
       select,
-      button {
-        font: inherit;
-      }
+      button { font: inherit; }
 
       input,
       select {
         width: 100%;
+        min-height: 48px;
         padding: 12px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(148, 163, 184, 0.28);
-        background: rgba(8, 12, 28, 0.88);
+        border: 1px solid rgba(246, 241, 231, 0.16);
+        background: rgba(0, 0, 0, 0.3);
         color: var(--text);
         outline: none;
       }
 
       input:focus,
       select:focus {
-        border-color: rgba(96, 165, 250, 0.8);
-        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
+        border-color: rgba(200, 245, 109, 0.82);
+        box-shadow: 0 0 0 4px rgba(200, 245, 109, 0.12);
       }
 
       button {
+        min-height: 46px;
         width: fit-content;
-        border: none;
+        border: 1px solid rgba(200, 245, 109, 0.42);
         border-radius: 14px;
         padding: 12px 16px;
-        background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
-        color: white;
-        font-weight: 700;
+        background: linear-gradient(180deg, var(--accent) 0%, #9fdc45 100%);
+        color: var(--accent-ink);
+        font-weight: 900;
         cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
       }
 
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity: 0.58; cursor: not-allowed; transform: none; }
+      button.wide { width: 100%; }
+
       button.secondary {
-        background: rgba(148, 163, 184, 0.14);
-        border: 1px solid var(--line);
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.055);
+        border-color: var(--line-strong);
       }
 
       button.danger {
         background: rgba(127, 29, 29, 0.18);
-        border: 1px solid rgba(248, 113, 113, 0.38);
-        color: #fecaca;
+        border-color: rgba(255, 122, 112, 0.38);
+        color: #ffd2cd;
       }
 
       .checkbox-row {
@@ -227,6 +451,7 @@ function renderLayout({ title, eyebrow, body }) {
 
       .checkbox-row input {
         width: auto;
+        min-height: auto;
       }
 
       pre {
@@ -235,26 +460,48 @@ function renderLayout({ title, eyebrow, body }) {
         white-space: pre-wrap;
         word-break: break-word;
         padding: 16px;
-        border-radius: 16px;
+        border-radius: 18px;
         border: 1px solid var(--line);
-        background: rgba(8, 12, 28, 0.88);
+        background: rgba(0, 0, 0, 0.34);
+        color: #e5eadf;
       }
 
       .banner {
         padding: 14px 16px;
-        border-radius: 16px;
+        border-radius: 18px;
         border: 1px solid var(--line);
-        background: rgba(8, 12, 28, 0.55);
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .error {
+        border-color: rgba(255, 122, 112, 0.36);
+        color: #ffd2cd;
+        background: rgba(127, 29, 29, 0.18);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .console-topbar {
+        padding-bottom: 4px;
+      }
+
+      .top-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
 
       .log-controls {
         display: flex;
-        align-items: center;
+        align-items: end;
         gap: 12px;
         flex-wrap: wrap;
-      }
-
-      .log-controls {
         margin-top: 14px;
       }
 
@@ -273,14 +520,13 @@ function renderLayout({ title, eyebrow, body }) {
 
       .log-entry {
         border: 1px solid var(--line);
-        border-left: 4px solid var(--accent);
-        border-radius: 16px;
+        border-radius: 18px;
         padding: 14px;
-        background: rgba(8, 12, 28, 0.62);
+        background: rgba(0, 0, 0, 0.24);
       }
 
-      .log-entry.level-warn { border-left-color: #fbbf24; }
-      .log-entry.level-error { border-left-color: var(--danger); }
+      .log-entry.level-warn { border-color: rgba(246, 198, 95, 0.5); }
+      .log-entry.level-error { border-color: rgba(255, 122, 112, 0.5); }
 
       .log-entry-header {
         display: flex;
@@ -291,25 +537,19 @@ function renderLayout({ title, eyebrow, body }) {
         margin-bottom: 8px;
       }
 
-      .log-event {
-        font-weight: 800;
-      }
+      .log-event { font-weight: 900; }
 
       .log-meta {
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
         color: var(--muted);
-        font-size: 0.85rem;
+        font-size: 0.82rem;
       }
 
       .log-chip {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid var(--line);
-        border-radius: 999px;
         padding: 4px 8px;
-        background: rgba(15, 23, 42, 0.85);
+        background: rgba(0, 0, 0, 0.22);
       }
 
       .log-details {
@@ -317,25 +557,52 @@ function renderLayout({ title, eyebrow, body }) {
         font-size: 0.86rem;
       }
 
-      .error {
-        border-color: rgba(248, 113, 113, 0.35);
-        color: #fecaca;
-        background: rgba(127, 29, 29, 0.18);
+      @media (max-width: 860px) {
+        .login-page .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .login-hero {
+          min-height: auto;
+          padding: 34px;
+        }
+
+        .hero-kicker { margin-top: 54px; }
+
+        .login-signal {
+          position: relative;
+          left: auto;
+          right: auto;
+          bottom: auto;
+          margin-top: 34px;
+        }
+
+        .login-card {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+          padding: 34px;
+        }
+
+        .topbar { flex-direction: column; }
+        .top-actions { justify-content: flex-start; }
       }
 
-      .topbar {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 18px;
+      @media (max-width: 560px) {
+        main { width: min(100% - 20px, 1180px); padding: 10px 0 28px; }
+        .shell { border-radius: 22px; padding: 20px; }
+        .login-page .shell { border-radius: 24px; }
+        .login-hero, .login-card { padding: 24px; }
+        h1 { font-size: clamp(2.05rem, 12vw, 3.2rem); }
+        .split { grid-template-columns: 1fr; }
+        .signal-line { grid-template-columns: 10px 1fr; }
+        .signal-line em { grid-column: 2; }
       }
     </style>
   </head>
-  <body>
+  <body class="${escapeHtml(pageClass)}">
     <main>
       <section class="shell">
-        <div class="eyebrow">${escapeHtml(eyebrow)}</div>
+        ${eyebrowBlock}
         ${body}
       </section>
     </main>
@@ -349,41 +616,41 @@ export function renderLoginPage({ errorMessage = '', loginPath = '/login' } = {}
     : '';
 
   return renderLayout({
-    title: 'claude-anthropic-proxy login',
-    eyebrow: 'Password-protected docs',
+    title: 'Claude Proxy Console',
+    pageClass: 'login-page',
     body: `
-      <h1>문서 페이지 로그인</h1>
-      <p class="lede">
-        <span class="inline-code">/docs</span> 문서 화면은 비밀번호로 보호됩니다. API 경로는 별도로 유지되고,
-        로그인 후에는 엔드포인트 설명과 호출 예제만 보여줍니다.
-      </p>
-      <div class="split" style="margin-top: 24px;">
-        <article class="panel">
-          <h2>접속 방법</h2>
-          <p class="muted">
-            환경 변수 <span class="inline-code">WEB_PASSWORD</span> 또는
-            <span class="inline-code">WEB_PASSWORD_HASH</span> 로 설정한 비밀번호를 입력하세요.
-          </p>
+      <section class="login-hero">
+        <div class="wordmark">
+          <span class="wordmark-mark">CP</span>
+          <span>Claude Proxy</span>
+        </div>
+        <p class="hero-kicker">Private AI gateway</p>
+        <h1>Claude를<br />사내 API처럼.</h1>
+        <p class="login-copy">키, 로그, 세션만 남긴 운영 콘솔. 들어가서 바로 조치합니다.</p>
+        <div class="login-signal" aria-label="service signals">
+          <div class="signal-line"><span></span><strong>Ingress</strong><em>claude-proxy.idc.hkyo.kr</em></div>
+          <div class="signal-line"><span></span><strong>State</strong><em>Redis-backed runtime</em></div>
+          <div class="signal-line"><span></span><strong>Logs</strong><em>Live request trail</em></div>
+        </div>
+      </section>
+      <aside class="login-card">
+        <div class="login-card-inner">
+          <div class="lock-icon" aria-hidden="true">⌁</div>
+          <div>
+            <h2>운영자 로그인</h2>
+            <p class="muted" style="margin-bottom: 0;">비밀번호만 입력하세요.</p>
+          </div>
           ${errorBlock}
           <form method="post" action="${escapeHtml(loginPath)}">
             <label>
-              비밀번호
-              <input type="password" name="password" autocomplete="current-password" required />
+              Access password
+              <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" required />
             </label>
-            <button type="submit">로그인</button>
+            <button type="submit" class="wide">Enter console</button>
           </form>
-        </article>
-        <article class="panel">
-          <h2>들어가면 보이는 것</h2>
-          <ul class="endpoint-list">
-            <li><span class="method">GET</span> <span class="endpoint-path">/health</span> 프로세스 상태 확인</li>
-            <li><span class="method">GET</span> <span class="endpoint-path">/ready</span> Redis 포함 readiness 확인</li>
-            <li><span class="method">GET</span> <span class="endpoint-path">/metrics</span> JSON 운영 지표 확인</li>
-            <li><span class="method">GET</span> <span class="endpoint-path">/v1/models</span> 모델 alias 확인</li>
-            <li><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span> Anthropic Messages API 호환 요청</li>
-          </ul>
-        </article>
-      </div>
+          <p class="login-footnote">로그인 후 proxy key · logs · Claude session 관리</p>
+        </div>
+      </aside>
     `,
   });
 }
@@ -422,10 +689,10 @@ export function renderHomePage(config) {
   const baseUrl = `http://localhost:${config.port}`;
   const headerRequired = Boolean(config.proxyApiKey) || !config.allowMissingApiKeyHeader;
   const apiKeyNote = config.proxyApiKey
-    ? '이 서버는 고정 x-api-key 가 설정되어 있으니 /v1/messages 호출 때 같은 값을 헤더로 보내야 합니다.'
+    ? 'required'
     : headerRequired
-      ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 호출 때 x-api-key 헤더 자체는 필요합니다.'
-      : '아직 런타임 x-api-key 가 없어서 /v1/messages 호출은 헤더 없이도 들어옵니다.';
+      ? 'header required'
+      : 'open until saved';
   const { messageExample, streamExample } = buildMessageExamples({
     baseUrl,
     defaultAnthropicVersion: config.defaultAnthropicVersion,
@@ -433,70 +700,60 @@ export function renderHomePage(config) {
   });
 
   return renderLayout({
-    title: 'claude-anthropic-proxy docs',
-    eyebrow: 'Authenticated endpoint guide',
+    title: 'Claude Proxy Console',
+    eyebrow: 'Operator console',
+    pageClass: 'console-page',
     body: `
-      <div class="topbar">
+      <div class="topbar console-topbar">
         <div>
-          <h1>claude-anthropic-proxy</h1>
-          <p class="lede">
-            이 웹 화면은 간단한 운영 문서 페이지입니다.
-            문서 비밀번호는 항상 필요하고, 로그인 후에는 엔드포인트 예제와 x-api-key, Claude CLI 로그인 상태를 같이 관리할 수 있습니다.
-          </p>
+          <div class="wordmark" style="margin-bottom: 22px;">
+            <span class="wordmark-mark">CP</span>
+            <span>Claude Proxy</span>
+          </div>
+          <h1>Control room.</h1>
+          <p class="lede">프록시 키, 라이브 로그, Claude 세션. 운영에 필요한 것만 남겼습니다.</p>
         </div>
-        <form method="post" action="/logout"><button type="submit" class="secondary">로그아웃</button></form>
+        <form method="post" action="/logout" class="top-actions"><button type="submit" class="secondary">로그아웃</button></form>
       </div>
 
-      <div class="grid">
-        <article class="panel">
-          <h2>기본 정보</h2>
-          <p>기본 Anthropic 버전: <span class="inline-code">${defaultAnthropicVersion}</span></p>
-          <p>기본 Claude 모델 alias: <span class="inline-code">${defaultModel}</span></p>
-          <p class="muted" id="proxy-api-key-note">${escapeHtml(apiKeyNote)}</p>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <span>Anthropic version</span>
+          <strong>${defaultAnthropicVersion}</strong>
         </article>
-        <article class="panel">
-          <h2>웹 인증</h2>
-          <p>
-            ${config.webPasswordHash
-              ? '문서 화면은 해시된 비밀번호 검증 후 접근됩니다.'
-              : '문서 화면은 비밀번호 로그인 후 접근됩니다.'}
-          </p>
-          <p class="muted">
-            서버는 시작 전에 <span class="inline-code">WEB_PASSWORD</span> 또는
-            <span class="inline-code">WEB_PASSWORD_HASH</span> 가 반드시 필요합니다.
-          </p>
+        <article class="stat-card">
+          <span>Default model</span>
+          <strong>${defaultModel}</strong>
+        </article>
+        <article class="stat-card">
+          <span>Proxy key</span>
+          <strong id="proxy-api-key-note">${escapeHtml(apiKeyNote)}</strong>
+        </article>
+        <article class="stat-card">
+          <span>Console auth</span>
+          <strong>${config.webPasswordHash ? 'hashed password' : 'password'}</strong>
         </article>
       </div>
 
-      <section class="panel" style="margin-top: 20px;">
-        <h2>엔드포인트</h2>
-        <ul class="endpoint-list">
-          <li>
-            <div><span class="method">GET</span> <span class="endpoint-path">/health</span></div>
-            <div class="muted">서버 생존 여부 확인</div>
-          </li>
-          <li>
-            <div><span class="method">GET</span> <span class="endpoint-path">/v1/models</span></div>
-            <div class="muted">사용 가능한 Claude CLI alias 확인</div>
-          </li>
-          <li>
-            <div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div>
-            <div class="muted">Anthropic Messages API 호환 요청. x-api-key 를 여기서 요구하도록 바꿀 수 있습니다.</div>
-          </li>
-          <li>
-            <div><span class="method">GET</span> <span class="endpoint-path">/logs/recent</span></div>
-            <div class="muted">문서 로그인 후 최근 프록시 로그와 동시성 상태 확인</div>
-          </li>
+      <section class="panel">
+        <div class="topbar">
+          <div>
+            <h2>Routes</h2>
+            <p class="muted" style="margin-bottom: 0;">외부 연동에 필요한 경로만 표시합니다.</p>
+          </div>
+        </div>
+        <ul class="endpoint-list compact" style="margin-top: 16px;">
+          <li><div><span class="method">GET</span> <span class="endpoint-path">/health</span></div><div class="muted">liveness</div></li>
+          <li><div><span class="method">GET</span> <span class="endpoint-path">/v1/models</span></div><div class="muted">model aliases</div></li>
+          <li><div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div><div class="muted">Messages API</div></li>
+          <li><div><span class="method">GET</span> <span class="endpoint-path">/logs/recent</span></div><div class="muted">recent events</div></li>
         </ul>
       </section>
 
-      <section class="split" style="margin-top: 20px;">
+      <section class="split">
         <article class="panel">
-          <h2>x-api-key 설정</h2>
-          <p class="muted">
-            문서 로그인 후 여기서 프록시가 검사할 <span class="inline-code">x-api-key</span> 값을 바꿀 수 있습니다.
-            값은 상태 파일에 저장되고, 서버를 재시작해도 다시 불러옵니다.
-          </p>
+          <h2>Proxy key</h2>
+          <p class="muted">저장하면 <span class="inline-code">/v1/messages</span>가 이 키만 받습니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="proxy-api-key-summary"><strong>상태 확인 중...</strong></div>
             <div id="proxy-api-key-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
@@ -504,68 +761,50 @@ export function renderHomePage(config) {
           <form id="proxy-api-key-form">
             <label>
               새 x-api-key
-              <input id="proxy-api-key-input" type="password" minlength="8" placeholder="8자 이상 입력" required />
+              <input id="proxy-api-key-input" type="password" minlength="8" placeholder="8자 이상" required />
             </label>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-              <button id="proxy-api-key-submit" type="submit">x-api-key 저장</button>
-              <button id="proxy-api-key-reset" type="button" class="secondary">리셋</button>
+              <button id="proxy-api-key-submit" type="submit">키 저장</button>
+              <button id="proxy-api-key-reset" type="button" class="secondary">새 키 발급</button>
             </div>
           </form>
         </article>
         <article class="panel">
-          <h2>현재 키 / 전달 메모</h2>
-          <p class="muted">
-            문서 로그인 상태에서는 현재 x-api-key 원문을 볼 수 있습니다.
-            리셋은 새 랜덤 키를 즉시 발급하고 이전 키는 바로 무효화합니다.
-          </p>
+          <h2>Current key</h2>
+          <p class="muted">로그인한 운영자에게만 원문을 보여줍니다.</p>
           <pre id="proxy-api-key-preview">현재 설정된 x-api-key 가 없습니다.</pre>
         </article>
       </section>
 
-      <section class="split" style="margin-top: 20px;">
+      <section class="split">
         <article class="panel">
-          <h2>예제 1 · health</h2>
-          <pre>${escapeHtml(`curl ${baseUrl}/health`)}</pre>
-        </article>
-        <article class="panel">
-          <h2>예제 2 · models</h2>
-          <pre>${escapeHtml(`curl ${baseUrl}/v1/models`)}</pre>
-        </article>
-      </section>
-
-      <section class="split" style="margin-top: 20px;">
-        <article class="panel">
-          <h2>예제 3 · 일반 메시지 요청</h2>
+          <h2>Message</h2>
           <pre id="message-example">${escapeHtml(messageExample)}</pre>
         </article>
         <article class="panel">
-          <h2>예제 4 · 스트리밍 요청</h2>
+          <h2>Stream</h2>
           <pre id="stream-example">${escapeHtml(streamExample)}</pre>
         </article>
       </section>
 
-      <section class="panel" style="margin-top: 20px;">
+      <section class="panel">
         <div class="topbar">
           <div>
-          <h2>최근 로그 / 동시성 상태</h2>
-          <p class="muted">
-            최근 요청, 인증, 키 변경, Claude 실행 이벤트를 한 화면에서 확인합니다.
-            검색과 레벨 필터로 장애 원인을 빠르게 좁히고, 필요하면 JSON으로 내려받을 수 있습니다.
-          </p>
+            <h2>Live logs</h2>
+            <p class="muted" style="margin-bottom: 0;">검색, 레벨 필터, JSON 저장.</p>
           </div>
-          <button id="recent-log-refresh" type="button" class="secondary">지금 새로고침</button>
+          <button id="recent-log-refresh" type="button" class="secondary">새로고침</button>
         </div>
-        <div class="banner">
-            <div id="recent-log-summary"><strong>로그 상태 확인 중...</strong></div>
-            <div class="muted" style="margin-top: 8px;">로그 새로고침 요청 자체는 로그에 남기지 않아 화면이 스스로를 오염시키지 않습니다.</div>
+        <div class="banner" style="margin-top: 16px;">
+          <div id="recent-log-summary"><strong>로그 상태 확인 중...</strong></div>
         </div>
         <div class="log-controls">
           <label>
             로그 검색
-            <input id="recent-log-search" type="search" placeholder="event, requestId, statusCode 검색" />
+            <input id="recent-log-search" type="search" placeholder="event, requestId, statusCode" />
           </label>
           <label>
-            레벨 필터
+            레벨
             <select id="recent-log-level">
               <option value="all">전체</option>
               <option value="error">error</option>
@@ -585,14 +824,10 @@ export function renderHomePage(config) {
         </div>
       </section>
 
-      <section class="split" style="margin-top: 20px;">
+      <section class="split">
         <article class="panel">
-          <h2>Claude CLI 로그인</h2>
-          <p class="muted">
-            아래 버튼은 서버 호스트에서 <span class="inline-code">claude auth login</span> /
-            <span class="inline-code">claude auth logout</span> 를 실행합니다.
-            Claude Code 공식 문서 기준으로 인증은 브라우저 프롬프트를 통해 진행됩니다.
-          </p>
+          <h2>Claude session</h2>
+          <p class="muted">서버의 Claude CLI 인증 상태입니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="claude-auth-summary"><strong>상태 확인 중...</strong></div>
             <div id="claude-auth-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
@@ -606,7 +841,7 @@ export function renderHomePage(config) {
               </select>
             </label>
             <label>
-              이메일 (optional)
+              이메일 optional
               <input id="claude-auth-email" name="email" placeholder="you@example.com" />
             </label>
             <label class="checkbox-row">
@@ -614,21 +849,16 @@ export function renderHomePage(config) {
               <span>SSO 강제 사용</span>
             </label>
             <div style="display:flex; gap:12px; flex-wrap:wrap;">
-              <button id="claude-auth-login-button" type="submit">Claude 로그인 시작</button>
-              <button id="claude-auth-logout-button" type="button" class="secondary">Claude 로그아웃</button>
+              <button id="claude-auth-login-button" type="submit">로그인 시작</button>
+              <button id="claude-auth-logout-button" type="button" class="secondary">로그아웃</button>
             </div>
           </form>
         </article>
         <article class="panel">
-          <h2>실행 로그 / 링크</h2>
-          <p class="muted">
-            로그인 명령 출력이 여기에 표시됩니다. 브라우저가 자동으로 열리지 않으면
-            여기 나온 안내 또는 URL을 따라가면 됩니다.
-          </p>
+          <h2>Auth output</h2>
+          <p class="muted">감지된 링크가 있으면 여기서 바로 엽니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
-            <div><strong>브라우저가 서버에서 안 열리면:</strong></div>
-            <div class="muted" style="margin-top: 8px;">아래 링크가 보이면 직접 열어서 인증을 이어가세요.</div>
-            <ul id="claude-auth-links" class="link-list" style="margin-top: 12px;">
+            <ul id="claude-auth-links" class="link-list">
               <li class="muted">아직 감지된 로그인 링크가 없습니다.</li>
             </ul>
           </div>
@@ -729,18 +959,18 @@ export function renderHomePage(config) {
                 .filter(Boolean)
                 .join(' · ')
             : proxyApiKeyHeaderRequired
-              ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 요청에는 x-api-key 헤더가 필요합니다.'
-              : '아직 런타임 x-api-key 가 없습니다. 저장하면 이후 /v1/messages 요청에 헤더가 필요합니다.';
+              ? 'x-api-key 헤더가 필요합니다. 새 키를 저장하세요.'
+              : '키를 저장하면 이후 요청부터 검사합니다.';
           proxyApiKeyPreview.textContent = apiKey
             ? '현재 x-api-key\\n' + apiKey
             : proxyApiKeyConfigured
               ? '현재 마스킹된 값\\n' + (settings.maskedApiKey || '')
               : '현재 설정된 x-api-key 가 없습니다.';
           proxyApiKeyNote.textContent = proxyApiKeyConfigured
-            ? '이 서버는 고정 x-api-key 가 설정되어 있으니 /v1/messages 호출 때 같은 값을 헤더로 보내야 합니다.'
+            ? 'required'
             : proxyApiKeyHeaderRequired
-              ? '현재 고정 x-api-key 는 없지만, 설정상 /v1/messages 호출 때 x-api-key 헤더 자체는 필요합니다.'
-              : '아직 런타임 x-api-key 가 없어서 /v1/messages 호출은 헤더 없이도 들어옵니다.';
+              ? 'header required'
+              : 'open until saved';
           messageExamplePre.textContent = buildMessageExample(false);
           streamExamplePre.textContent = buildMessageExample(true);
         }
