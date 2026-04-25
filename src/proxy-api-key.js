@@ -97,20 +97,46 @@ export function createProxyApiKeyManager({
   historyLimit = 5,
 } = {}) {
   const bootstrapApiKey = String(initialApiKey || '').trim();
-  let currentApiKey = bootstrapApiKey;
-  let updatedAt = currentApiKey ? new Date().toISOString() : null;
+  const bootstrapUpdatedAt = bootstrapApiKey ? new Date().toISOString() : null;
+  let currentApiKey = '';
+  let updatedAt = null;
   let previousApiKeys = [];
   let history = [];
 
-  if (loadedState?.proxyApiKey) {
-    currentApiKey = loadedState.proxyApiKey;
-    updatedAt = loadedState.updatedAt || updatedAt || new Date().toISOString();
-    previousApiKeys = normalizePreviousApiKeys(loadedState.previousApiKeys, gracePeriodSeconds);
-    history = normalizeHistory(loadedState.history);
+  function applyLoadedState(nextState) {
+    const effectiveState = nextState?.proxyApiKey
+      ? nextState
+      : bootstrapApiKey
+        ? { proxyApiKey: bootstrapApiKey, updatedAt: bootstrapUpdatedAt }
+        : null;
+
+    if (!effectiveState?.proxyApiKey) {
+      currentApiKey = '';
+      updatedAt = null;
+      previousApiKeys = [];
+      history = [];
+      return;
+    }
+
+    currentApiKey = String(effectiveState.proxyApiKey || '').trim();
+    updatedAt = effectiveState.updatedAt || bootstrapUpdatedAt || new Date().toISOString();
+    previousApiKeys = normalizePreviousApiKeys(effectiveState.previousApiKeys, gracePeriodSeconds);
+    history = normalizeHistory(effectiveState.history);
+
+    if (currentApiKey && history.length === 0) {
+      history = [createHistoryEntry({ apiKey: currentApiKey, activatedAt: updatedAt })];
+    }
+
+    trimHistory();
   }
 
-  if (currentApiKey && history.length === 0) {
-    history = [createHistoryEntry({ apiKey: currentApiKey, activatedAt: updatedAt })];
+  function snapshotState() {
+    return JSON.stringify({
+      currentApiKey,
+      updatedAt,
+      previousApiKeys,
+      history,
+    });
   }
 
   function prunePreviousApiKeys() {
@@ -125,6 +151,8 @@ export function createProxyApiKeyManager({
 
     history = history.slice(0, historyLimit);
   }
+
+  applyLoadedState(loadedState);
 
   async function persistState(nextApiKey, nextUpdatedAt) {
     if (!storage) {
@@ -243,6 +271,25 @@ export function createProxyApiKeyManager({
       };
     },
     getStatus,
+    async reloadState() {
+      if (!storage || typeof storage.loadState !== 'function') {
+        return {
+          changed: false,
+          apiKey: currentApiKey || null,
+          ...getStatus(),
+        };
+      }
+
+      const before = snapshotState();
+      applyLoadedState(await storage.loadState());
+      const changed = before !== snapshotState();
+
+      return {
+        changed,
+        apiKey: currentApiKey || null,
+        ...getStatus(),
+      };
+    },
     async resetApiKey(apiKey = '') {
       const nextApiKey = String(apiKey || '').trim();
       const nextUpdatedAt = nextApiKey ? new Date().toISOString() : null;

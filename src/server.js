@@ -33,6 +33,7 @@ const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const CALL_TEST_DEFAULT_MODEL = 'claude-sonnet-4-20250514';
 const CALL_TEST_DEFAULT_PROMPT = 'Reply only OK.';
+const RUNTIME_STATE_REFRESH_INTERVAL_MS = 1_000;
 const webSessions = new Map();
 const webLoginAttempts = new Map();
 let memoryWebPasswordState = null;
@@ -242,6 +243,90 @@ function log(event, details = {}, level = 'info') {
   recentLogStore.add(level, event, details);
   if (!config.enableRequestLogging) return;
   console.log(new Date().toISOString(), event, details);
+}
+
+function webPasswordStateSignature(state) {
+  return state?.passwordHash ? `${state.updatedAt || ''}:${state.passwordHash}` : 'null';
+}
+
+let webPasswordRefreshPromise = null;
+let proxyApiKeyRefreshPromise = null;
+let lastProxyApiKeyRefreshAt = 0;
+
+async function refreshWebPasswordState({ reason = 'request' } = {}) {
+  if (webPasswordRefreshPromise) {
+    return webPasswordRefreshPromise;
+  }
+
+  webPasswordRefreshPromise = (async () => {
+    const before = webPasswordStateSignature(activeWebPasswordState);
+    const nextState = await webAuthStateStore.getPasswordState();
+    activeWebPasswordState = nextState ? { ...nextState } : null;
+    const changed = before !== webPasswordStateSignature(activeWebPasswordState);
+
+    if (changed) {
+      log('web password state refreshed', {
+        source: activeWebPasswordState?.passwordHash ? 'runtime' : 'config',
+        updatedAt: activeWebPasswordState?.updatedAt || null,
+        reason,
+      }, 'warn');
+    }
+
+    return {
+      changed,
+      source: activeWebPasswordState?.passwordHash ? 'runtime' : 'config',
+      updatedAt: activeWebPasswordState?.updatedAt || null,
+    };
+  })().finally(() => {
+    webPasswordRefreshPromise = null;
+  });
+
+  return webPasswordRefreshPromise;
+}
+
+async function refreshProxyApiKeyState({ force = false, reason = 'request' } = {}) {
+  if (typeof proxyApiKeyManager.reloadState !== 'function') {
+    return {
+      changed: false,
+      skipped: true,
+      apiKey: proxyApiKeyManager.getApiKey() || null,
+      ...proxyApiKeyManager.getStatus(),
+    };
+  }
+
+  const now = Date.now();
+  if (!force && now - lastProxyApiKeyRefreshAt < RUNTIME_STATE_REFRESH_INTERVAL_MS) {
+    return {
+      changed: false,
+      skipped: true,
+      apiKey: proxyApiKeyManager.getApiKey() || null,
+      ...proxyApiKeyManager.getStatus(),
+    };
+  }
+
+  if (proxyApiKeyRefreshPromise) {
+    return proxyApiKeyRefreshPromise;
+  }
+
+  proxyApiKeyRefreshPromise = (async () => {
+    const result = await proxyApiKeyManager.reloadState();
+    lastProxyApiKeyRefreshAt = Date.now();
+    config.proxyApiKey = result.apiKey || '';
+
+    if (result.changed) {
+      log('proxy api key state refreshed', {
+        maskedApiKey: result.maskedApiKey,
+        updatedAt: result.updatedAt,
+        reason,
+      }, 'warn');
+    }
+
+    return result;
+  })().finally(() => {
+    proxyApiKeyRefreshPromise = null;
+  });
+
+  return proxyApiKeyRefreshPromise;
 }
 
 if (claudeAuthStore) {
@@ -725,7 +810,11 @@ async function readFormBody(req, limitBytes = 16 * 1024) {
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
-async function hasDocsAccess(req) {
+async function hasDocsAccess(req, { refresh = true } = {}) {
+  if (refresh) {
+    await refreshWebPasswordState({ reason: 'docs-access' });
+  }
+
   if (!isWebLoginEnabled()) {
     return true;
   }
@@ -734,13 +823,15 @@ async function hasDocsAccess(req) {
 }
 
 async function ensureDocsAccess(req, res, { requireWebLogin = false } = {}) {
-  if (requireWebLogin && !isWebLoginEnabled()) {
-    jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
-    return false;
-  }
-
   try {
-    if (await hasDocsAccess(req)) {
+    await refreshWebPasswordState({ reason: 'docs-access' });
+
+    if (requireWebLogin && !isWebLoginEnabled()) {
+      jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
+      return false;
+    }
+
+    if (await hasDocsAccess(req, { refresh: false })) {
       return true;
     }
   } catch (error) {
@@ -769,6 +860,14 @@ function renderDocsStateUnavailable(res, message) {
 }
 
 async function handleWebLogin(req, res) {
+  try {
+    await refreshWebPasswordState({ reason: 'login' });
+  } catch (error) {
+    log('docs auth state failed', { error: error.message }, 'error');
+    renderDocsStateUnavailable(res, '로그인 상태 저장소를 읽지 못했습니다. 잠시 후 다시 시도하세요.');
+    return;
+  }
+
   if (!isWebLoginEnabled()) {
     redirect(res, '/docs', {
       'cache-control': 'no-store',
@@ -955,14 +1054,8 @@ async function handleClaudeAuthStatus(req, res) {
 }
 
 function handleClaudeAuthOperation(req, res) {
-  if (!isWebLoginEnabled()) {
-    jsonError(res, 403, 'Set WEB_PASSWORD or WEB_PASSWORD_HASH to enable web Claude auth actions.');
-    return;
-  }
-
-  void getWebSession(req).then((session) => {
-    if (!session) {
-      jsonError(res, 401, 'Web docs login is required.');
+  void (async () => {
+    if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
       return;
     }
 
@@ -970,7 +1063,7 @@ function handleClaudeAuthOperation(req, res) {
       ok: true,
       operation: claudeAuthManager.getOperation(),
     });
-  });
+  })();
 }
 
 async function handleClaudeAuthLogin(req, res) {
@@ -1031,6 +1124,14 @@ function handleProxyApiKeyStatus(req, res) {
       return;
     }
 
+    try {
+      await refreshProxyApiKeyState({ force: true, reason: 'proxy-key-status' });
+    } catch (error) {
+      log('proxy api key state refresh failed', { error: error.message, reason: 'proxy-key-status' }, 'error');
+      jsonError(res, 503, 'Proxy API key state is temporarily unavailable.');
+      return;
+    }
+
     json(res, 200, {
       ok: true,
       settings: buildProxyApiKeySettings(),
@@ -1053,6 +1154,7 @@ async function handleProxyApiKeyUpdate(req, res) {
       : proxyApiKeyManager.setApiKey(body?.apiKey));
 
     config.proxyApiKey = next.apiKey;
+    lastProxyApiKeyRefreshAt = Date.now();
     metrics.proxyApiKey.rotations += 1;
 
     json(res, 200, {
@@ -1188,6 +1290,7 @@ async function handleCallTest(req, res) {
   try {
     const body = await readJsonBody(req, 16 * 1024);
     const { model, prompt, maxTokens } = normalizeCallTestBody(body);
+    await refreshProxyApiKeyState({ force: true, reason: 'call-test' });
     const apiKey = proxyApiKeyManager.getApiKey();
 
     if (!apiKey && !config.allowMissingApiKeyHeader) {
@@ -1279,7 +1382,14 @@ async function syncClaudeAuthForProxyRequest(requestId) {
   }
 }
 
-function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
+async function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
+  try {
+    await refreshProxyApiKeyState({ reason: 'proxy-auth' });
+  } catch (error) {
+    log('proxy api key state refresh failed', { requestId, error: error.message }, 'error');
+    throw new ProxyError(503, 'api_error', 'Proxy API key state sync failed. Retry shortly.');
+  }
+
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
   const configuredProxyApiKey = proxyApiKeyManager.getApiKey();
@@ -1357,11 +1467,11 @@ function sendModels(res, requestId) {
   });
 }
 
-function handleModels(req, res) {
+async function handleModels(req, res) {
   const requestId = createRequestId();
 
   try {
-    applyProxyAuth(req, requestId, { requireAnthropicVersion: false });
+    await applyProxyAuth(req, requestId, { requireAnthropicVersion: false });
     sendModels(res, requestId);
   } catch (error) {
     sendProxyError(res, error, requestId);
@@ -1390,7 +1500,7 @@ async function handleMessages(req, res) {
   }
 
   try {
-    applyProxyAuth(req, requestId);
+    await applyProxyAuth(req, requestId);
     const body = await readJsonBody(req, config.requestBodyLimitBytes);
     validateMessagesRequest(body);
     await syncClaudeAuthForProxyRequest(requestId);
@@ -1667,8 +1777,7 @@ function requestHandler(req, res) {
   if (req.method === 'GET' && req.url === '/docs') {
     void (async () => {
       try {
-        const session = await getWebSession(req);
-        if (isWebLoginEnabled() && !session) {
+        if (!(await hasDocsAccess(req))) {
           html(res, 200, renderLoginPage({ loginPath: '/login' }), {
             vary: 'Cookie',
             'cache-control': 'no-store',
@@ -1691,8 +1800,7 @@ function requestHandler(req, res) {
   if (req.method === 'GET' && req.url === '/login') {
     void (async () => {
       try {
-        const session = await getWebSession(req);
-        if (!isWebLoginEnabled() || session) {
+        if (await hasDocsAccess(req)) {
           redirect(res, '/docs', {
             'cache-control': 'no-store',
           });
@@ -1732,7 +1840,14 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'GET' && req.url === '/api-info') {
-    json(res, 200, buildServiceMetadata());
+    void (async () => {
+      await refreshWebPasswordState({ reason: 'api-info' });
+      await refreshProxyApiKeyState({ reason: 'api-info' });
+      json(res, 200, buildServiceMetadata());
+    })().catch((error) => {
+      log('api info state refresh failed', { error: error.message }, 'error');
+      json(res, 503, { ok: false, error: 'Runtime state is temporarily unavailable.' });
+    });
     return;
   }
 
@@ -1828,7 +1943,7 @@ function requestHandler(req, res) {
   }
 
   if (req.method === 'GET' && req.url === '/v1/models') {
-    handleModels(req, res);
+    void handleModels(req, res);
     return;
   }
 
@@ -1935,6 +2050,9 @@ async function shutdown(reason = 'manual', { exit = false } = {}) {
 
 async function resetWebPasswordForTests() {
   activeWebPasswordState = null;
+  webPasswordRefreshPromise = null;
+  proxyApiKeyRefreshPromise = null;
+  lastProxyApiKeyRefreshAt = 0;
   webSessions.clear();
   webLoginAttempts.clear();
   await webAuthStateStore.clearPasswordState?.();

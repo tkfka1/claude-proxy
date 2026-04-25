@@ -149,11 +149,18 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
 
 웹 비밀번호를 잊었거나 Secret에 보관한 값과 Redis 런타임 값을 다시 맞춰야 하면 admin CLI로 재설정합니다.
-아래 명령은 비밀번호 파일을 stdin으로 넘기고, 기존 웹 세션과 로그인 실패 카운터를 같이 정리합니다.
+아래 명령은 비밀번호 파일을 stdin으로 넘기고, 기존 웹 세션과 로그인 실패 카운터를 같이 정리합니다. 실행 중인 Pod는 Redis 값을 다시 읽습니다(웹 로그인은 다음 로그인/세션 확인, 프록시 인증은 최대 1초 캐시 후 반영).
 
 ```bash
 kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
   sh -lc 'claude-proxy-admin web-password reset --stdin' < /path/to/password.txt
+```
+
+웹에 로그인할 수 없고 `x-api-key` 를 복구해야 하면 새 키 파일을 Redis에 직접 반영할 수 있습니다. 복구 경로는 이전 키 grace period를 보존하지 않습니다.
+
+```bash
+kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
+  sh -lc 'claude-proxy-admin proxy-key reset --stdin' < /path/to/proxy-key.txt
 ```
 
 legacy local-file fallback이 꼭 필요하면 `examples/values-proxy-state-pvc.yaml` 를 참고할 수 있지만, 운영 기본 경로는 Redis입니다.

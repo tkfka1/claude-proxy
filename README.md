@@ -240,7 +240,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 둘 다 비워 두면 서버가 시작되지 않습니다. 비밀번호 복잡성 제한은 없고, 비어 있지만 않으면 됩니다.
 
 운영에서 웹 비밀번호를 잊었거나 Redis에 저장된 런타임 비밀번호를 초기값과 다시 맞추려면 admin CLI로 재설정할 수 있습니다.
-기본값으로 기존 웹 세션과 로그인 실패 카운터도 같이 지웁니다.
+기본값으로 기존 웹 세션과 로그인 실패 카운터도 같이 지웁니다. 실행 중인 Pod는 Redis 값을 다시 읽으므로 별도 재시작이 필요하지 않습니다(웹 로그인은 다음 로그인/세션 확인, 프록시 인증은 최대 1초 캐시 후 반영).
 
 ```bash
 claude-proxy-admin web-password reset --password-file /path/to/password.txt
@@ -255,15 +255,29 @@ kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
 
 Shell history에 남을 수 있으므로 운영에서는 `--password` 보다 `--password-file` 또는 `--stdin` 을 권장합니다.
 
+웹에 로그인할 수 없는 상태에서 런타임 `x-api-key` 도 Redis에 직접 재설정할 수 있습니다. 이 경로는 복구용이므로 이전 키 grace period를 보존하지 않고 새 키만 즉시 유효하게 만듭니다.
+
+```bash
+claude-proxy-admin proxy-key reset --key-file /path/to/proxy-key.txt
+claude-proxy-admin proxy-key generate
+```
+
+컨테이너 안에서 파일을 stdin으로 넘기는 예:
+
+```bash
+kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
+  sh -lc 'claude-proxy-admin proxy-key reset --stdin' < /path/to/proxy-key.txt
+```
+
 ### 웹에서 x-api-key 설정
 
 - `/docs` 로그인 후 문서 페이지에서 바로 설정 가능
 - 로그인 상태에서는 현재 x-api-key 원문을 바로 확인 가능
-- 저장한 값은 현재 서버 프로세스 메모리에 반영되고, 즉시 `/v1/messages` 의 `x-api-key` 검증에 사용됨
+- 저장한 값은 Redis와 현재 서버 프로세스에 반영되고, 다른 Pod도 최대 1초 캐시 후 다시 읽어 `/v1/messages` / `/v1/models` 검증에 사용함
 - `리셋` 버튼은 새 랜덤 x-api-key 를 다시 발급하고 이전 키는 grace period 동안만 임시 허용
 - `PROXY_API_KEY_GRACE_PERIOD_SECONDS`: 로테이션 직전 키를 허용할 유예 시간(기본값 `300`, `0`이면 이전 키 즉시 무효화)
 - `PROXY_API_KEY_HISTORY_LIMIT`: `/proxy-api-key` / `/metrics` 에 노출할 masked key history 개수(기본값 `5`, `0`이면 history 비활성화)
-- Redis에 저장되므로 서버/Pod를 재시작해도 다시 불러옴
+- Redis에 저장되므로 서버/Pod를 재시작해도 다시 불러오며, admin CLI로 외부 재설정한 값도 실행 중인 Pod에 자동 반영됨
 - `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, Redis에 저장된 값이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음

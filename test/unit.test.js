@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
 import {
   buildClaudePrompt,
@@ -30,7 +31,7 @@ import {
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
 import { createRedisStateStore } from '../src/redis-state-store.js';
-import { resetWebPassword } from '../src/admin.js';
+import { resetProxyApiKey, resetWebPassword, runAdminCli } from '../src/admin.js';
 import {
   createClaudeAuthManager,
   normalizeClaudeAuthSnapshot,
@@ -442,6 +443,43 @@ test('proxy api key manager bootstraps from env once and then keeps persisted st
 
   assert.equal(rotatedManager.getApiKey(), 'persisted-secret-key');
   assert.equal(store.loadState().proxyApiKey, 'persisted-secret-key');
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('proxy api key manager reloads externally persisted state without old-key grace', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-reload-'));
+  const store = createProxyStateFileStore({
+    filePath: path.join(tempDir, 'runtime-state.json'),
+  });
+
+  const manager = createProxyApiKeyManager({
+    initialApiKey: 'bootstrap-env-key',
+    storage: store,
+  });
+  await manager.setApiKey('current-runtime-secret');
+
+  store.saveState({
+    proxyApiKey: 'external-runtime-secret',
+    updatedAt: '2026-04-25T00:00:00.000Z',
+    previousApiKeys: [],
+    history: [
+      {
+        maskedApiKey: 'exte…et',
+        activatedAt: '2026-04-25T00:00:00.000Z',
+        retiredAt: null,
+        expiresAt: null,
+      },
+    ],
+  });
+
+  const result = await manager.reloadState();
+
+  assert.equal(result.changed, true);
+  assert.equal(result.apiKey, 'external-runtime-secret');
+  assert.equal(manager.getApiKey(), 'external-runtime-secret');
+  assert.equal(manager.verifyApiKey('current-runtime-secret').valid, false);
+  assert.equal(manager.verifyApiKey('external-runtime-secret').matched, 'current');
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
@@ -891,4 +929,53 @@ test('resetWebPassword updates Redis runtime password and clears stale web auth 
   const passwordState = JSON.parse(fakeClient.values.get('claude-proxy-test:web-password'));
   assert.equal(verifyWebPassword('1234', { webPasswordHash: passwordState.passwordHash }), true);
   assert.equal(fakeClient.isOpen, false);
+});
+
+test('resetProxyApiKey updates Redis runtime proxy key without preserving stale grace keys', async () => {
+  const fakeClient = new FakeRedisStateClient();
+
+  const result = await resetProxyApiKey({
+    apiKey: 'operator-reset-key',
+    redisUrl: 'redis://fake:6379/0',
+    redisKeyPrefix: 'claude-proxy-test',
+    clientFactory: () => fakeClient,
+  });
+
+  assert.equal(result.redisKeyPrefix, 'claude-proxy-test');
+  assert.equal(result.maskedApiKey, 'oper…ey');
+
+  const proxyState = JSON.parse(fakeClient.values.get('claude-proxy-test:proxy-api-key'));
+  assert.equal(proxyState.proxyApiKey, 'operator-reset-key');
+  assert.deepEqual(proxyState.previousApiKeys, []);
+  assert.equal(proxyState.history[0].maskedApiKey, 'oper…ey');
+  assert.equal(proxyState.history[0].retiredAt, null);
+  assert.equal(fakeClient.isOpen, false);
+});
+
+test('runAdminCli resets proxy key from stdin without echoing the raw key', async () => {
+  const fakeClient = new FakeRedisStateClient();
+  const stdout = [];
+  const stderr = [];
+
+  const code = await runAdminCli([
+    'proxy-key',
+    'reset',
+    '--stdin',
+    '--redis-url',
+    'redis://fake:6379/0',
+    '--redis-key-prefix',
+    'claude-proxy-test',
+  ], {
+    stdin: Readable.from(['operator-reset-key\n']),
+    stdout: { write: (chunk) => stdout.push(String(chunk)) },
+    stderr: { write: (chunk) => stderr.push(String(chunk)) },
+    clientFactory: () => fakeClient,
+  });
+
+  assert.equal(code, 0);
+  assert.equal(stderr.join(''), '');
+  assert.match(stdout.join(''), /Proxy x-api-key reset complete/);
+  assert.match(stdout.join(''), /maskedApiKey=oper…ey/);
+  assert.doesNotMatch(stdout.join(''), /operator-reset-key/);
+  assert.equal(JSON.parse(fakeClient.values.get('claude-proxy-test:proxy-api-key')).proxyApiKey, 'operator-reset-key');
 });

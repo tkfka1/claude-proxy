@@ -31,6 +31,7 @@ const {
   config,
   messageConcurrencyManager,
   proxyApiKeyManager,
+  proxyStateFileStore,
   recentLogStore,
   resetWebPasswordForTests,
   server,
@@ -839,6 +840,40 @@ test('GET /v1/models enforces the configured x-api-key without requiring anthrop
   });
   assert.equal(okResponse.status, 200);
   assert.match(okResponse.headers.get('request-id') || '', /^req_/);
+  const okBody = await okResponse.json();
+  assert.deepEqual(okBody.data.map((model) => model.id), ['sonnet', 'opus', 'haiku']);
+});
+
+test('GET /v1/models reloads an externally reset x-api-key before authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  await proxyApiKeyManager.resetApiKey('runtime-secret-key');
+  proxyStateFileStore.saveState({
+    proxyApiKey: 'external-runtime-secret',
+    updatedAt: '2026-04-25T00:00:00.000Z',
+    previousApiKeys: [],
+    history: [
+      {
+        maskedApiKey: 'exte…et',
+        activatedAt: '2026-04-25T00:00:00.000Z',
+        retiredAt: null,
+        expiresAt: null,
+      },
+    ],
+  });
+
+  const oldKeyResponse = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      'x-api-key': 'runtime-secret-key',
+    },
+  });
+  assert.equal(oldKeyResponse.status, 401);
+
+  const okResponse = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      'x-api-key': 'external-runtime-secret',
+    },
+  });
+  assert.equal(okResponse.status, 200);
   const okBody = await okResponse.json();
   assert.deepEqual(okBody.data.map((model) => model.id), ['sonnet', 'opus', 'haiku']);
 });
