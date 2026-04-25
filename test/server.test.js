@@ -259,6 +259,21 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.match(body, /<link rel="shortcut icon" href="\/favicon\.ico\?v=[a-f0-9]{12}" \/>/);
 });
 
+test('GET /docs ignores malformed session cookie values', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/docs`, {
+    headers: {
+      cookie: 'claude_proxy_web_session=%',
+    },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /Login/);
+  assert.doesNotMatch(body, /System status/);
+});
+
 test('GET /favicon and manifest serve Claude Proxy assets without polluting recent logs', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
   const cookie = await loginDocs(baseUrl);
