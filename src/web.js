@@ -1,7 +1,7 @@
 export const serviceMetadata = {
   ok: true,
   service: 'claude-anthropic-proxy',
-  endpoints: ['/health', '/v1/messages', '/v1/models'],
+  endpoints: ['/health', '/ready', '/metrics', '/v1/messages', '/v1/models'],
   docs_path: '/docs',
 };
 
@@ -300,7 +300,9 @@ export function renderLoginPage({ errorMessage = '', loginPath = '/login' } = {}
         <article class="panel">
           <h2>들어가면 보이는 것</h2>
           <ul class="endpoint-list">
-            <li><span class="method">GET</span> <span class="endpoint-path">/health</span> 상태 확인</li>
+            <li><span class="method">GET</span> <span class="endpoint-path">/health</span> 프로세스 상태 확인</li>
+            <li><span class="method">GET</span> <span class="endpoint-path">/ready</span> Redis 포함 readiness 확인</li>
+            <li><span class="method">GET</span> <span class="endpoint-path">/metrics</span> JSON 운영 지표 확인</li>
             <li><span class="method">GET</span> <span class="endpoint-path">/v1/models</span> 모델 alias 확인</li>
             <li><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span> Anthropic Messages API 호환 요청</li>
           </ul>

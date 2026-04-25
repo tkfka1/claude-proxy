@@ -33,6 +33,8 @@ function parseIntegerEnv(name, fallback) {
 export function loadConfig() {
   const modelMap = parseJsonEnv('CLAUDE_MODEL_MAP_JSON', {});
   const extraArgs = parseJsonEnv('CLAUDE_EXTRA_ARGS_JSON', []);
+  const redisUrl = process.env.REDIS_URL || '';
+  const allowLocalStateBackend = parseBooleanEnv('ALLOW_LOCAL_STATE_BACKEND', false);
   const webSessionTtlHours = parseIntegerEnv('WEB_SESSION_TTL_HOURS', 12);
   const webLoginMaxAttempts = parseIntegerEnv('WEB_LOGIN_MAX_ATTEMPTS', 5);
   const webLoginWindowMinutes = parseIntegerEnv('WEB_LOGIN_WINDOW_MINUTES', 15);
@@ -40,6 +42,11 @@ export function loadConfig() {
   const maxQueuedMessageRequests = parseIntegerEnv('MAX_QUEUED_MESSAGE_REQUESTS', 16);
   const maxMessageQueueWaitMs = parseIntegerEnv('MAX_MESSAGE_QUEUE_WAIT_MS', 30_000);
   const recentLogLimit = parseIntegerEnv('RECENT_LOG_LIMIT', 200);
+  const claudeRequestTimeoutMs = parseIntegerEnv('CLAUDE_REQUEST_TIMEOUT_MS', 300_000);
+  const claudeStreamIdleTimeoutMs = parseIntegerEnv('CLAUDE_STREAM_IDLE_TIMEOUT_MS', 60_000);
+  const shutdownGraceMs = parseIntegerEnv('SHUTDOWN_GRACE_MS', 10_000);
+  const proxyApiKeyGracePeriodSeconds = parseIntegerEnv('PROXY_API_KEY_GRACE_PERIOD_SECONDS', 300);
+  const proxyApiKeyHistoryLimit = parseIntegerEnv('PROXY_API_KEY_HISTORY_LIMIT', 5);
 
   if (!Array.isArray(extraArgs)) {
     throw new Error('CLAUDE_EXTRA_ARGS_JSON must be a JSON array');
@@ -73,6 +80,30 @@ export function loadConfig() {
     throw new Error('RECENT_LOG_LIMIT must be greater than 0');
   }
 
+  if (claudeRequestTimeoutMs < 0) {
+    throw new Error('CLAUDE_REQUEST_TIMEOUT_MS must be 0 or greater');
+  }
+
+  if (claudeStreamIdleTimeoutMs < 0) {
+    throw new Error('CLAUDE_STREAM_IDLE_TIMEOUT_MS must be 0 or greater');
+  }
+
+  if (shutdownGraceMs <= 0) {
+    throw new Error('SHUTDOWN_GRACE_MS must be greater than 0');
+  }
+
+  if (proxyApiKeyGracePeriodSeconds < 0) {
+    throw new Error('PROXY_API_KEY_GRACE_PERIOD_SECONDS must be 0 or greater');
+  }
+
+  if (proxyApiKeyHistoryLimit < 0) {
+    throw new Error('PROXY_API_KEY_HISTORY_LIMIT must be 0 or greater');
+  }
+
+  if (!redisUrl && !allowLocalStateBackend) {
+    throw new Error('REDIS_URL is required. Start Redis and set REDIS_URL, or set ALLOW_LOCAL_STATE_BACKEND=true only for isolated tests.');
+  }
+
   validateWebPasswordSettings({
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
@@ -89,8 +120,9 @@ export function loadConfig() {
     proxyApiKey: process.env.PROXY_API_KEY || '',
     proxyStateFile: resolveProxyStateFile(),
     recentLogFile: resolveRecentLogFile(),
-    redisUrl: process.env.REDIS_URL || '',
+    redisUrl,
     redisKeyPrefix: process.env.REDIS_KEY_PREFIX || 'claude-anthropic-proxy',
+    allowLocalStateBackend,
     requireAnthropicVersion: parseBooleanEnv('REQUIRE_ANTHROPIC_VERSION', false),
     defaultAnthropicVersion: process.env.DEFAULT_ANTHROPIC_VERSION || '2023-06-01',
     allowMissingApiKeyHeader: parseBooleanEnv('ALLOW_MISSING_API_KEY_HEADER', true),
@@ -99,6 +131,11 @@ export function loadConfig() {
     maxQueuedMessageRequests,
     maxMessageQueueWaitMs,
     recentLogLimit,
+    claudeRequestTimeoutMs,
+    claudeStreamIdleTimeoutMs,
+    shutdownGraceMs,
+    proxyApiKeyGracePeriodSeconds,
+    proxyApiKeyHistoryLimit,
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
     webSessionTtlHours,

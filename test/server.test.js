@@ -22,6 +22,7 @@ process.env.RECENT_LOG_FILE = path.join(tempDir, 'recent-log.json');
 process.env.MOCK_CLAUDE_AUTH_STATE_FILE = path.join(tempDir, 'mock-claude-auth-state.json');
 process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 process.env.REDIS_URL = '';
+process.env.ALLOW_LOCAL_STATE_BACKEND = 'true';
 process.env.REDIS_KEY_PREFIX = 'claude-anthropic-proxy';
 
 const {
@@ -30,6 +31,7 @@ const {
   proxyApiKeyManager,
   recentLogStore,
   server,
+  shutdown,
 } = await import('../src/server.js');
 
 function resetMockClaudeAuthState(state = {}) {
@@ -101,9 +103,15 @@ test.after(async () => {
 test.beforeEach(async () => {
   resetMockClaudeAuthState();
   delete process.env.MOCK_CLAUDE_AUTH_LOGIN_FAIL;
+  delete process.env.MOCK_CLAUDE_ERROR;
+  delete process.env.MOCK_CLAUDE_RESULT;
   delete process.env.MOCK_CLAUDE_DELAY_MS;
   delete process.env.MOCK_CLAUDE_STREAM_DELAY_MS;
+  delete process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_DELAY_MS;
+  delete process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_COUNT;
   config.proxyApiKey = '';
+  config.claudeRequestTimeoutMs = 300_000;
+  config.claudeStreamIdleTimeoutMs = 60_000;
   await proxyApiKeyManager.resetApiKey('');
   config.allowMissingApiKeyHeader = true;
   messageConcurrencyManager.clearQueue();
@@ -303,9 +311,57 @@ test('GET /api-info returns service metadata JSON', async () => {
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.ok, true);
-  assert.deepEqual(body.endpoints, ['/health', '/v1/messages', '/v1/models']);
+  assert.deepEqual(body.endpoints, ['/health', '/ready', '/metrics', '/v1/messages', '/v1/models']);
   assert.equal(body.web_login_enabled, true);
   assert.equal(body.docs_path, '/docs');
+});
+
+test('GET /health returns process status and backend summary', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/health`);
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.service, 'claude-anthropic-proxy');
+  assert.equal(body.stateBackend, 'file');
+  assert.equal(body.redis, null);
+  assert.equal(body.logStore.enabled, true);
+});
+
+test('GET /ready returns readiness status including message execution', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/ready`);
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.service, 'claude-anthropic-proxy');
+  assert.equal(body.stateBackend, 'file');
+  assert.equal(body.redis, null);
+  assert.equal(body.messageExecution.backend, 'local');
+});
+
+test('GET /metrics returns request, message, backend, and key rotation counters', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/metrics`);
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.service, 'claude-anthropic-proxy');
+  assert.equal(body.stateBackend, 'file');
+  assert.equal(body.redis, null);
+  assert.equal(typeof body.uptimeSeconds, 'number');
+  assert.equal(typeof body.requests.total, 'number');
+  assert.equal(typeof body.messages.total, 'number');
+  assert.equal(typeof body.claudeCli.jsonStarted, 'number');
+  assert.equal(typeof body.proxyApiKey.rotations, 'number');
+  assert.equal(body.proxyApiKey.status.configured, false);
+  assert.equal(body.messageExecution.backend, 'local');
 });
 
 test('GET /claude-auth/status returns Claude auth status for docs-authenticated users', async () => {
@@ -400,7 +456,7 @@ test('POST /proxy-api-key updates the runtime x-api-key after docs login', async
   assert.equal(persistedState.proxyApiKey, 'runtime-secret-key');
 });
 
-test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts requiring it', async () => {
+test('POST /proxy-api-key reset rotates the runtime key with previous-key grace', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'proxy reply';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
   const cookie = await loginDocs(baseUrl);
@@ -436,6 +492,9 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
   assert.equal(resetBody.ok, true);
   assert.equal(resetBody.settings.configured, true);
   assert.equal(resetBody.settings.headerRequired, true);
+  assert.equal(resetBody.settings.previousKeyCount, 1);
+  assert.equal(resetBody.settings.previousKeys[0].maskedApiKey, 'runt…ey');
+  assert.equal(resetBody.settings.history.length, 2);
   assert.match(resetBody.apiKey, /^[A-Za-z0-9_-]{20,}$/);
   assert.notEqual(resetBody.apiKey, 'runtime-secret-key');
 
@@ -456,7 +515,7 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
   const missingHeaderBody = await missingHeaderResponse.json();
   assert.equal(missingHeaderBody.error.message, 'x-api-key header is required');
 
-  const oldKeyResponse = await fetch(`${baseUrl}/v1/messages`, {
+  const previousGraceResponse = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -470,9 +529,9 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
     }),
   });
 
-  assert.equal(oldKeyResponse.status, 401);
-  const oldKeyBody = await oldKeyResponse.json();
-  assert.equal(oldKeyBody.error.message, 'Invalid API key');
+  assert.equal(previousGraceResponse.status, 200);
+  const previousGraceBody = await previousGraceResponse.json();
+  assert.equal(previousGraceBody.content[0].text, 'proxy reply');
 
   const okResponse = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
@@ -489,6 +548,28 @@ test('POST /proxy-api-key reset rotates the runtime key and /v1/messages starts 
   });
 
   assert.equal(okResponse.status, 200);
+
+  const invalidKeyResponse = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': 'definitely-invalid-key',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(invalidKeyResponse.status, 401);
+  const invalidKeyBody = await invalidKeyResponse.json();
+  assert.equal(invalidKeyBody.error.message, 'Invalid API key');
+
+  const metricsResponse = await fetch(`${baseUrl}/metrics`);
+  const metricsBody = await metricsResponse.json();
+  assert.ok(metricsBody.proxyApiKey.previousKeyMatches >= 1);
 });
 
 test('GET /logs/recent returns recent entries and concurrency status for docs-authenticated users', async () => {
@@ -678,6 +759,11 @@ test('stream disconnect is logged as aborted and frees the execution slot', asyn
     ),
   );
   assert.equal(logBody.messageExecution.active, 0);
+
+  const metricsResponse = await fetch(`${baseUrl}/metrics`);
+  const metricsBody = await metricsResponse.json();
+  assert.ok(metricsBody.requests.aborted >= 1);
+  assert.ok(metricsBody.requests.status.aborted >= 1);
 });
 
 test('POST /v1/messages stays locked until x-api-key is configured when missing headers are disallowed', async () => {
@@ -800,6 +886,35 @@ test('POST /v1/messages returns Anthropic-style JSON', async () => {
   assert.equal(body.usage.output_tokens, 7);
 });
 
+test('POST /v1/messages returns 504 when the Claude CLI request times out', async () => {
+  process.env.MOCK_CLAUDE_DELAY_MS = '200';
+  config.claudeRequestTimeoutMs = 25;
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(response.status, 504);
+  const body = await response.json();
+  assert.equal(body.error.type, 'api_error');
+  assert.match(body.error.message, /timed out after 25ms/);
+
+  const metricsResponse = await fetch(`${baseUrl}/metrics`);
+  const metricsBody = await metricsResponse.json();
+  assert.ok(metricsBody.claudeCli.timeout >= 1);
+});
+
 test('POST /v1/messages stream=true returns SSE event sequence', async () => {
   process.env.MOCK_CLAUDE_RESULT = 'stream reply';
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
@@ -826,6 +941,63 @@ test('POST /v1/messages stream=true returns SSE event sequence', async () => {
   assert.match(text, /"text":"stream"/);
   assert.match(text, /"text":" reply"/);
   assert.match(text, /event: message_stop/);
+});
+
+test('POST /v1/messages stream=true emits an SSE error on stream idle timeout', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'stream reply';
+  process.env.MOCK_CLAUDE_STREAM_DELAY_MS = '200';
+  config.claudeRequestTimeoutMs = 1_000;
+  config.claudeStreamIdleTimeoutMs = 25;
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      stream: true,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.match(text, /event: error/);
+  assert.match(text, /stream idle timed out after 25ms/);
+});
+
+test('POST /v1/messages stream=true does not idle-timeout while non-assistant keepalives arrive', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'stream reply';
+  process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_DELAY_MS = '20';
+  process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_COUNT = '3';
+  config.claudeRequestTimeoutMs = 1_000;
+  config.claudeStreamIdleTimeoutMs = 35;
+
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 256,
+      stream: true,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.match(text, /event: message_stop/);
+  assert.doesNotMatch(text, /event: error/);
 });
 
 
@@ -872,4 +1044,20 @@ test('POST /v1/messages rejects tools payloads', async () => {
   const body = await response.json();
   assert.equal(body.type, 'error');
   assert.equal(body.error.type, 'invalid_request_error');
+});
+
+test('shutdown can be called again after the server is restarted in the same process', async () => {
+  if (!server.listening) {
+    await startServer();
+  }
+
+  await shutdown('test-first');
+  assert.equal(server.listening, false);
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  assert.equal(server.listening, true);
+
+  await shutdown('test-second');
+  assert.equal(server.listening, false);
 });

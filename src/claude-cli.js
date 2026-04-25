@@ -53,7 +53,24 @@ function createCliError(message, raw = undefined) {
   return new ProxyError(500, 'api_error', message || 'claude-cli invocation failed', raw);
 }
 
-export async function runClaudeJson({ claudeBin, model, systemPrompt, prompt, extraArgs, signal }) {
+function createCliTimeoutError(kind, timeoutMs) {
+  const error = new ProxyError(504, 'api_error', `claude-cli ${kind} timed out after ${timeoutMs}ms`);
+  error.code = 'CLAUDE_CLI_TIMEOUT';
+  return error;
+}
+
+function terminateChild(child) {
+  if (child.exitCode == null && child.signalCode == null) {
+    child.kill('SIGTERM');
+    setTimeout(() => {
+      if (child.exitCode == null && child.signalCode == null) {
+        child.kill('SIGKILL');
+      }
+    }, 1_000).unref?.();
+  }
+}
+
+export async function runClaudeJson({ claudeBin, model, systemPrompt, prompt, extraArgs, signal, timeoutMs = 0 }) {
   const args = buildArgs({ model, systemPrompt, stream: false, extraArgs });
   const child = spawn(claudeBin, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -62,14 +79,25 @@ export async function runClaudeJson({ claudeBin, model, systemPrompt, prompt, ex
 
   const stdoutChunks = [];
   const stderrChunks = [];
+  let timedOut = false;
+  let aborted = false;
+  let timeoutId = null;
 
   const abortHandler = () => {
-    child.kill('SIGTERM');
+    aborted = true;
+    terminateChild(child);
   };
 
   if (signal) {
     if (signal.aborted) abortHandler();
     signal.addEventListener('abort', abortHandler, { once: true });
+  }
+
+  if (timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      terminateChild(child);
+    }, timeoutMs);
   }
 
   child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
@@ -78,9 +106,20 @@ export async function runClaudeJson({ claudeBin, model, systemPrompt, prompt, ex
   child.stdin.end(prompt);
 
   const [code] = await once(child, 'close');
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
 
   if (signal) {
     signal.removeEventListener('abort', abortHandler);
+  }
+
+  if (timedOut) {
+    throw createCliTimeoutError('request', timeoutMs);
+  }
+
+  if (aborted) {
+    throw createCliError('claude-cli invocation was aborted');
   }
 
   const stdoutText = Buffer.concat(stdoutChunks).toString('utf8').trim();
@@ -116,6 +155,8 @@ export function runClaudeStream({
   extraArgs,
   stopSequences,
   signal,
+  timeoutMs = 0,
+  idleTimeoutMs = 0,
   onText,
   onDone,
   onError,
@@ -134,15 +175,53 @@ export function runClaudeStream({
   let latestUsage = defaultUsage();
   let finalResult = null;
   let settled = false;
+  let aborted = false;
+  let timeoutId = null;
+  let idleTimeoutId = null;
 
   const abortHandler = () => {
-    child.kill('SIGTERM');
+    aborted = true;
+    terminateChild(child);
   };
+
+  function cleanup() {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    if (idleTimeoutId) {
+      clearTimeout(idleTimeoutId);
+      idleTimeoutId = null;
+    }
+    if (signal) {
+      signal.removeEventListener('abort', abortHandler);
+    }
+    rl.close();
+  }
+
+  function failWithTimeout(kind, ms) {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    terminateChild(child);
+    onError(createCliTimeoutError(kind, ms));
+  }
+
+  function refreshIdleTimer() {
+    if (idleTimeoutMs <= 0) return;
+    if (idleTimeoutId) clearTimeout(idleTimeoutId);
+    idleTimeoutId = setTimeout(() => failWithTimeout('stream idle', idleTimeoutMs), idleTimeoutMs);
+  }
 
   if (signal) {
     if (signal.aborted) abortHandler();
     signal.addEventListener('abort', abortHandler, { once: true });
   }
+
+  if (timeoutMs > 0) {
+    timeoutId = setTimeout(() => failWithTimeout('stream request', timeoutMs), timeoutMs);
+  }
+  refreshIdleTimer();
 
   child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
 
@@ -155,6 +234,8 @@ export function runClaudeStream({
     } catch {
       return;
     }
+
+    refreshIdleTimer();
 
     if (event.type === 'assistant' && !event.parent_tool_use_id && !event.isSynthetic && !event.isReplay) {
       const fullText = extractAssistantText(event.message?.content);
@@ -183,18 +264,21 @@ export function runClaudeStream({
   child.on('error', (error) => {
     if (settled) return;
     settled = true;
+    cleanup();
     onError(createCliError(error.message));
   });
 
   child.on('close', (code) => {
     if (settled) return;
     settled = true;
-
-    if (signal) {
-      signal.removeEventListener('abort', abortHandler);
-    }
+    cleanup();
 
     const stderrText = Buffer.concat(stderrChunks).toString('utf8').trim();
+
+    if (aborted && !finalResult) {
+      onError(createCliError('claude-cli invocation was aborted'));
+      return;
+    }
 
     if (finalResult?.is_error) {
       onError(createCliError(finalResult.result || stderrText || 'claude-cli returned an error result', finalResult));
@@ -224,7 +308,7 @@ export function runClaudeStream({
 
   return {
     kill() {
-      child.kill('SIGTERM');
+      terminateChild(child);
     },
   };
 }
