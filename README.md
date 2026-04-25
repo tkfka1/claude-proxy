@@ -286,7 +286,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `Claude.ai` / `Anthropic Console` 선택 가능, 필요하면 SSO 강제 가능
 - 로그인 명령 출력에서 URL이 감지되면 웹 화면에 바로 링크로 표시
 - 원격 서버에 띄운 경우 브라우저가 **서버 쪽 환경**에서 열릴 수 있으니 주의
-- Helm 기본값은 Claude auth Secret을 writable runtime volume으로 복사합니다. `values-prod.yaml` 은 PVC를 켜서 CLI token refresh와 웹 로그인 결과가 Pod 재시작 후에도 남게 합니다.
+- Helm 기본값은 Claude auth Secret을 writable runtime volume으로 복사합니다. `values-prod.yaml` 은 각 Pod의 runtime volume을 Redis sync와 연결해 CLI token refresh와 웹 로그인 결과를 여러 Pod 사이에 공유합니다.
 
 ### Claude CLI 설정
 
@@ -307,8 +307,10 @@ CLAUDE_EXTRA_ARGS_JSON=["--verbose"]
 
 - `PROXY_API_KEY`: 프록시 자체 API 키 초기 bootstrap 값. 첫 저장 전 기본값으로만 사용되고, 이후에는 Redis에 저장된 값이 계속 사용됨
 - `PROXY_STATE_FILE`: Redis를 쓰지 않는 격리 테스트/local fallback에서만 쓰는 파일 경로. 운영 기본 경로에서는 사용하지 않음
-- `REDIS_URL`: x-api-key state / recent logs / 웹 로그인 세션 / 로그인 시도 제한 / 메시지 동시성 상태를 저장할 Redis 주소
+- `REDIS_URL`: x-api-key state / recent logs / 웹 로그인 세션 / 로그인 시도 제한 / 메시지 동시성 상태 / 선택적 Claude auth sync 상태를 저장할 Redis 주소
 - `REDIS_KEY_PREFIX`: Redis key namespace prefix
+- `CLAUDE_AUTH_DIR`: Claude CLI auth directory 경로. Kubernetes chart는 `claudeAuth.mountPath` 를 자동 주입
+- `CLAUDE_AUTH_REDIS_SYNC`: `true` 이면 Claude auth files를 Redis에 저장/적용해서 여러 Pod가 같은 Claude 인증 상태를 사용
 - `ALLOW_MISSING_API_KEY_HEADER`: `x-api-key` 없는 요청 허용 여부
 - `REQUIRE_ANTHROPIC_VERSION`: `anthropic-version` 헤더 필수 여부
 - `DEFAULT_ANTHROPIC_VERSION`: 기본 버전 문자열
@@ -722,7 +724,7 @@ deploy/k8s/
 ```
 
 기본 `values-prod.yaml` 은 내부 Redis를 같이 올립니다.
-`/v1/messages` 동시성/큐, `/docs` 에서 저장한 x-api-key, 최근 로그, 문서 로그인 세션/시도 제한은 Redis에 유지됩니다.
+`/v1/messages` 동시성/큐, `/docs` 에서 저장한 x-api-key, 최근 로그, 문서 로그인 세션/시도 제한, Claude auth runtime state는 Redis에 유지됩니다.
 Kubernetes readinessProbe는 `/ready`, livenessProbe는 `/health` 를 사용하고, Pod 종료 시 `terminationGracePeriodSeconds` 안에서 SIGTERM graceful shutdown을 수행합니다.
 처음부터 `PROXY_API_KEY` 를 Secret으로 넣고 싶을 때만 `deploy/k8s/create-proxy-env-secret.sh` 를 추가로 사용합니다.
 외부 Redis를 쓰려면 `EXTERNAL_REDIS_URL=redis://... ./deploy/k8s/deploy-helm.sh` 또는 Helm `--set redis.enabled=false --set env.REDIS_URL=...` 를 사용합니다.

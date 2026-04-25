@@ -27,6 +27,9 @@
 {{- else }}
   Writable auth files use emptyDir and reset on pod recreation.
 {{- end }}
+{{- if .Values.claudeAuth.redisSync.enabled }}
+  Runtime Claude auth changes are shared through Redis for multi-pod deployments.
+{{- end }}
 {{- else }}
   Runtime path is a read-only Secret mount.
 {{- end }}

@@ -73,7 +73,6 @@ const metrics = {
     forced: 0,
   },
 };
-const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
 const stateBackend = config.redisUrl
   ? await createRedisStateStore({
       url: config.redisUrl,
@@ -148,6 +147,14 @@ const recentLogStore = createRecentLogStore({
   limit: config.recentLogLimit,
   storage: recentLogFileStore,
   initialEntries: initialRecentLogEntries,
+});
+const claudeAuthStore = stateBackend && config.claudeAuthRedisSync
+  ? stateBackend.createClaudeAuthStore()
+  : null;
+const claudeAuthManager = createClaudeAuthManager({
+  claudeBin: config.claudeBin,
+  authDir: config.claudeAuthDir,
+  authStore: claudeAuthStore,
 });
 const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
@@ -235,6 +242,20 @@ function log(event, details = {}, level = 'info') {
   recentLogStore.add(level, event, details);
   if (!config.enableRequestLogging) return;
   console.log(new Date().toISOString(), event, details);
+}
+
+if (claudeAuthStore) {
+  try {
+    const seedResult = await claudeAuthManager.seedStoreFromLocalIfEmpty();
+    if (seedResult.seeded) {
+      log('claude auth shared state seeded', {
+        updatedAt: seedResult.updatedAt,
+        fileCount: seedResult.fileCount,
+      });
+    }
+  } catch (error) {
+    log('claude auth shared state seed failed', { error: error.message }, 'error');
+  }
 }
 
 function incrementCounter(path, key, by = 1) {
@@ -335,6 +356,7 @@ function buildServiceMetadata() {
       login: '/claude-auth/login',
       logout: '/claude-auth/logout',
     },
+    claude_auth_sync: claudeAuthManager.getSharedAuthStatus(),
     proxy_api_key_paths: {
       status: '/proxy-api-key',
       update: '/proxy-api-key',
@@ -404,6 +426,7 @@ async function buildReadinessStatus() {
     redis: config.stateBackend === 'redis' ? state : null,
     logStore,
     messageExecution,
+    claudeAuthSync: claudeAuthManager.getSharedAuthStatus(),
   };
 }
 
@@ -428,6 +451,7 @@ async function buildMetricsSnapshot() {
     redis: config.stateBackend === 'redis' ? stateBackend.getStatus() : null,
     logStore: recentLogStore.getStatus(),
     messageExecution,
+    claudeAuthSync: claudeAuthManager.getSharedAuthStatus(),
   };
 }
 
@@ -1229,6 +1253,22 @@ async function handleCallTest(req, res) {
   }
 }
 
+async function syncClaudeAuthForProxyRequest(requestId) {
+  try {
+    const result = await claudeAuthManager.syncFromStore();
+    if (result.applied) {
+      log('claude auth synced from shared state', {
+        requestId,
+        updatedAt: result.updatedAt,
+        fileCount: result.fileCount,
+      });
+    }
+  } catch (error) {
+    log('claude auth shared state sync failed', { requestId, error: error.message }, 'error');
+    throw new ProxyError(503, 'api_error', 'Claude auth state sync failed. Retry shortly.');
+  }
+}
+
 function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
@@ -1343,6 +1383,7 @@ async function handleMessages(req, res) {
     applyProxyAuth(req, requestId);
     const body = await readJsonBody(req, config.requestBodyLimitBytes);
     validateMessagesRequest(body);
+    await syncClaudeAuthForProxyRequest(requestId);
 
     const prompt = buildClaudePrompt(body.messages);
     const systemPrompt = normalizeSystemPrompt(body.system);

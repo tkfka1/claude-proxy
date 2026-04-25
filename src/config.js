@@ -1,5 +1,8 @@
 import 'dotenv/config';
 
+import os from 'node:os';
+import path from 'node:path';
+
 import { resolveProxyStateFile, resolveRecentLogFile } from './proxy-state-file.js';
 import { validateWebPasswordSettings } from './web-auth.js';
 
@@ -35,6 +38,7 @@ export function loadConfig() {
   const extraArgs = parseJsonEnv('CLAUDE_EXTRA_ARGS_JSON', []);
   const redisUrl = process.env.REDIS_URL || '';
   const allowLocalStateBackend = parseBooleanEnv('ALLOW_LOCAL_STATE_BACKEND', false);
+  const claudeAuthRedisSync = parseBooleanEnv('CLAUDE_AUTH_REDIS_SYNC', false);
   const webSessionTtlHours = parseIntegerEnv('WEB_SESSION_TTL_HOURS', 12);
   const webLoginMaxAttempts = parseIntegerEnv('WEB_LOGIN_MAX_ATTEMPTS', 5);
   const webLoginWindowMinutes = parseIntegerEnv('WEB_LOGIN_WINDOW_MINUTES', 15);
@@ -104,6 +108,10 @@ export function loadConfig() {
     throw new Error('REDIS_URL is required. Start Redis and set REDIS_URL, or set ALLOW_LOCAL_STATE_BACKEND=true only for isolated tests.');
   }
 
+  if (claudeAuthRedisSync && !redisUrl) {
+    throw new Error('CLAUDE_AUTH_REDIS_SYNC requires REDIS_URL because Claude auth files are shared through Redis.');
+  }
+
   validateWebPasswordSettings({
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
@@ -114,6 +122,8 @@ export function loadConfig() {
     port: parseIntegerEnv('PORT', 8080),
     requestBodyLimitBytes: parseIntegerEnv('REQUEST_BODY_LIMIT_BYTES', 32 * 1024 * 1024),
     claudeBin: process.env.CLAUDE_BIN || 'claude',
+    claudeAuthDir: process.env.CLAUDE_AUTH_DIR || path.join(os.homedir(), '.claude'),
+    claudeAuthRedisSync,
     claudeDefaultModel: process.env.CLAUDE_DEFAULT_MODEL || 'sonnet',
     claudeModelMap: modelMap,
     claudeExtraArgs: extraArgs.map(String),

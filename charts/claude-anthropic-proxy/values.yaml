@@ -153,6 +153,8 @@ claudeAuth:
   existingSecret: ""
   mountPath: /home/node/.claude
   writable: true
+  redisSync:
+    enabled: false
   seedMountPath: /tmp/claude-auth-seed
   seedPolicy: ifEmpty
   defaultMode: 420

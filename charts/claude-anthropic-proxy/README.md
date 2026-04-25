@@ -87,7 +87,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 ```
 
 기본 설치는 내부 Redis를 같이 띄웁니다. 프록시 Pod에는 내부 Redis 주소가 `REDIS_URL` 로 자동 주입됩니다.
-`values-prod.yaml` 은 Claude auth Secret을 writable PVC로 seed합니다. 그래서 Claude CLI token refresh와 `/docs` 웹 로그인 결과가 Pod 재시작 후에도 유지됩니다.
+`values-prod.yaml` 은 Claude auth Secret을 각 Pod의 writable runtime volume으로 seed하고 `claudeAuth.redisSync.enabled=true` 로 Redis에 동기화합니다. 그래서 Claude CLI token refresh와 `/docs` 웹 로그인 결과가 여러 프록시 Pod 사이에서 공유됩니다.
 
 외부 Redis를 쓰려면 내부 Redis를 끄고 `env.REDIS_URL` 을 지정합니다.
 
@@ -144,6 +144,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - 외부 Redis: `redis.enabled=false` 로 내부 Redis를 끄고 `env.REDIS_URL` 을 직접 지정하거나 `redis.external.existingSecret` 으로 Secret을 참조합니다.
 - `/v1/messages` active concurrency와 FIFO 대기열은 Redis semaphore 기준으로 공유됩니다. readinessProbe는 `/ready` 를 사용해 Redis `PING` 실패 시 트래픽을 받지 않습니다.
 - `/docs` 에서 저장한 x-api-key, 최근 로그, 로그인 세션, 로그인 시도 제한도 Redis에 저장됩니다.
+- `claudeAuth.redisSync.enabled=true` 이면 Claude auth runtime files도 Redis에 저장되어 여러 프록시 Pod가 같은 인증 상태를 사용합니다.
 - `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
 
@@ -206,6 +207,7 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `claudeAuth.createSecret`
 - `claudeAuth.mountPath`
 - `claudeAuth.writable`, `claudeAuth.seedPolicy`
+- `claudeAuth.redisSync.enabled`
 - `claudeAuth.persistence.*`
 
 ## values 파일 예시

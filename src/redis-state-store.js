@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import { normalizeClaudeAuthSnapshot } from './claude-auth.js';
 import { parseScryptPasswordHash } from './web-auth.js';
 
 function sanitizeKeySegment(value) {
@@ -278,6 +279,26 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
         },
         async clearPasswordState() {
           await client.del(passwordKey);
+        },
+      };
+    },
+    createClaudeAuthStore() {
+      const redisKey = buildKey(keyPrefix, 'claude-auth');
+
+      return {
+        async loadState() {
+          const raw = await client.get(redisKey);
+          if (!raw) {
+            return null;
+          }
+
+          return normalizeClaudeAuthSnapshot(JSON.parse(raw));
+        },
+        async saveState(state) {
+          await client.set(redisKey, JSON.stringify(normalizeClaudeAuthSnapshot(state)));
+        },
+        async clearState() {
+          await client.del(redisKey);
         },
       };
     },

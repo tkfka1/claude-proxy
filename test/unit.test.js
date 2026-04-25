@@ -30,6 +30,12 @@ import {
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
 import { createRedisStateStore } from '../src/redis-state-store.js';
+import {
+  createClaudeAuthManager,
+  normalizeClaudeAuthSnapshot,
+  readClaudeAuthSnapshot,
+  writeClaudeAuthSnapshot,
+} from '../src/claude-auth.js';
 import { loadConfig } from '../src/config.js';
 
 class FakeRedisSemaphoreClient {
@@ -237,6 +243,8 @@ test('loadConfig requires Redis unless local fallback is explicitly enabled', ()
     'WEB_PASSWORD_HASH',
     'CLAUDE_MODEL_MAP_JSON',
     'CLAUDE_EXTRA_ARGS_JSON',
+    'CLAUDE_AUTH_REDIS_SYNC',
+    'CLAUDE_AUTH_DIR',
   ];
   const snapshot = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 
@@ -247,10 +255,17 @@ test('loadConfig requires Redis unless local fallback is explicitly enabled', ()
     process.env.WEB_PASSWORD_HASH = '';
     process.env.CLAUDE_MODEL_MAP_JSON = '';
     process.env.CLAUDE_EXTRA_ARGS_JSON = '[]';
+    process.env.CLAUDE_AUTH_REDIS_SYNC = '';
+    process.env.CLAUDE_AUTH_DIR = '';
 
     assert.throws(() => loadConfig(), /REDIS_URL is required/);
 
     process.env.ALLOW_LOCAL_STATE_BACKEND = 'true';
+    process.env.CLAUDE_AUTH_REDIS_SYNC = 'true';
+    assert.throws(() => loadConfig(), /CLAUDE_AUTH_REDIS_SYNC requires REDIS_URL/);
+
+    process.env.ALLOW_LOCAL_STATE_BACKEND = 'true';
+    process.env.CLAUDE_AUTH_REDIS_SYNC = '';
     const config = loadConfig();
     assert.equal(config.redisUrl, '');
     assert.equal(config.allowLocalStateBackend, true);
@@ -494,6 +509,105 @@ test('recent log store redacts sensitive fields before persistence', async () =>
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('claude auth snapshots copy and replace auth files safely', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-snapshot-'));
+  const sourceDir = path.join(tempDir, 'source');
+  const targetDir = path.join(tempDir, 'target');
+
+  fs.mkdirSync(path.join(sourceDir, 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, '.credentials.json'), '{"token":"secret"}', { mode: 0o600 });
+  fs.writeFileSync(path.join(sourceDir, 'settings.json'), '{"theme":"dark"}', { mode: 0o600 });
+  fs.writeFileSync(path.join(sourceDir, 'nested', 'extra.json'), '{"ok":true}', { mode: 0o600 });
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'stale.json'), '{"stale":true}', { mode: 0o600 });
+
+  const snapshot = await readClaudeAuthSnapshot({
+    authDir: sourceDir,
+    updatedAt: '2026-04-25T00:00:00.000Z',
+  });
+
+  assert.deepEqual(snapshot.files.map((file) => file.path), [
+    '.credentials.json',
+    'nested/extra.json',
+    'settings.json',
+  ]);
+  assert.equal(snapshot.files[0].contentBase64, Buffer.from('{"token":"secret"}').toString('base64'));
+
+  await writeClaudeAuthSnapshot({ authDir: targetDir, snapshot });
+  assert.equal(fs.readFileSync(path.join(targetDir, '.credentials.json'), 'utf8'), '{"token":"secret"}');
+  assert.equal(fs.readFileSync(path.join(targetDir, 'nested', 'extra.json'), 'utf8'), '{"ok":true}');
+  assert.equal(fs.existsSync(path.join(targetDir, 'stale.json')), false);
+
+  await writeClaudeAuthSnapshot({
+    authDir: targetDir,
+    snapshot: {
+      version: 1,
+      updatedAt: '2026-04-25T00:01:00.000Z',
+      files: [],
+    },
+  });
+  assert.deepEqual(fs.readdirSync(targetDir), []);
+  assert.throws(
+    () => normalizeClaudeAuthSnapshot({
+      version: 1,
+      updatedAt: '2026-04-25T00:00:00.000Z',
+      files: [{ path: '../escape.json', contentBase64: '' }],
+    }),
+    /Invalid Claude auth snapshot file path/,
+  );
+  assert.throws(
+    () => normalizeClaudeAuthSnapshot({
+      version: 1,
+      updatedAt: '2026-04-25T00:00:00.000Z',
+      files: [{ path: '/absolute.json', contentBase64: '' }],
+    }),
+    /Invalid Claude auth snapshot file path/,
+  );
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('claude auth manager applies shared snapshots without exposing auth dir status', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-manager-'));
+  const authDir = path.join(tempDir, '.claude');
+  const sharedSnapshot = {
+    version: 1,
+    updatedAt: '2026-04-25T02:00:00.000Z',
+    files: [
+      {
+        path: '.credentials.json',
+        contentBase64: Buffer.from('{"token":"shared"}').toString('base64'),
+        mode: 0o600,
+      },
+    ],
+  };
+  const authStore = {
+    state: sharedSnapshot,
+    async loadState() {
+      return this.state;
+    },
+    async saveState(state) {
+      this.state = normalizeClaudeAuthSnapshot(state);
+    },
+  };
+
+  const manager = createClaudeAuthManager({
+    claudeBin: process.execPath,
+    authDir,
+    authStore,
+  });
+  const syncResult = await manager.syncFromStore();
+
+  assert.equal(syncResult.applied, true);
+  assert.equal(fs.readFileSync(path.join(authDir, '.credentials.json'), 'utf8'), '{"token":"shared"}');
+  assert.deepEqual(manager.getSharedAuthStatus(), {
+    enabled: true,
+    lastAppliedAt: '2026-04-25T02:00:00.000Z',
+  });
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 test('redis message concurrency manager enforces a global semaphore with local queueing', async () => {
   const client = new FakeRedisSemaphoreClient();
   const manager = createRedisMessageConcurrencyManager({
@@ -592,6 +706,32 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
   });
   await webAuthStore.clearPasswordState();
   assert.equal(await webAuthStore.getPasswordState(), null);
+
+  const claudeAuthStore = store.createClaudeAuthStore();
+  await claudeAuthStore.saveState({
+    version: 1,
+    updatedAt: '2026-04-25T01:00:00.000Z',
+    files: [
+      {
+        path: '.credentials.json',
+        contentBase64: Buffer.from('{"token":"redis"}').toString('base64'),
+        mode: 0o600,
+      },
+    ],
+  });
+  assert.deepEqual(await claudeAuthStore.loadState(), {
+    version: 1,
+    updatedAt: '2026-04-25T01:00:00.000Z',
+    files: [
+      {
+        path: '.credentials.json',
+        contentBase64: Buffer.from('{"token":"redis"}').toString('base64'),
+        mode: 0o600,
+      },
+    ],
+  });
+  await claudeAuthStore.clearState();
+  assert.equal(await claudeAuthStore.loadState(), null);
 
   await store.close();
 });

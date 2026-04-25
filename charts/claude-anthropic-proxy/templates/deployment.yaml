@@ -1,9 +1,13 @@
 {{- $multiReplica := or (and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) 1)) (and (not .Values.autoscaling.enabled) (gt (int .Values.replicaCount) 1)) }}
+{{- $hasRedisForAuthSync := or .Values.redis.enabled .Values.redis.external.existingSecret (hasKey .Values.env "REDIS_URL") }}
 {{- if and .Values.proxyState.persistence.enabled (not .Values.proxyState.persistence.allowSharedState) $multiReplica }}
 {{- fail "proxyState.persistence.enabled requires a single replica unless proxyState.persistence.allowSharedState=true" }}
 {{- end }}
 {{- if and (include "claude-anthropic-proxy.hasClaudeAuth" .) .Values.claudeAuth.writable .Values.claudeAuth.persistence.enabled $multiReplica }}
 {{- fail "claudeAuth.persistence.enabled requires a single replica because Claude CLI auth files are writable state" }}
+{{- end }}
+{{- if and .Values.claudeAuth.redisSync.enabled (not $hasRedisForAuthSync) }}
+{{- fail "claudeAuth.redisSync.enabled requires Redis. Enable redis.enabled, set redis.external.existingSecret, or set env.REDIS_URL" }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -108,6 +112,14 @@ spec:
             {{- if .Values.proxyState.persistence.enabled }}
             - name: PROXY_STATE_FILE
               value: {{ printf "%s/%s" .Values.proxyState.mountPath .Values.proxyState.fileName | quote }}
+            {{- end }}
+            {{- if and (include "claude-anthropic-proxy.hasClaudeAuth" .) (not (hasKey .Values.env "CLAUDE_AUTH_DIR")) }}
+            - name: CLAUDE_AUTH_DIR
+              value: {{ .Values.claudeAuth.mountPath | quote }}
+            {{- end }}
+            {{- if and .Values.claudeAuth.redisSync.enabled (not (hasKey .Values.env "CLAUDE_AUTH_REDIS_SYNC")) }}
+            - name: CLAUDE_AUTH_REDIS_SYNC
+              value: "true"
             {{- end }}
             {{- if .Values.proxyApiKey.existingSecret }}
             - name: PROXY_API_KEY

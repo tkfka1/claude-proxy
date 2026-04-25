@@ -117,6 +117,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - `/docs` 에 로그인해서 x-api-key 를 한 번 저장하면 이후 재시작해도 Redis에 유지됨
 - `/logs/recent` 및 `/docs` 최근 로그 패널도 Redis에 저장되어 재시작 후 이어짐
 - `/docs` 로그인 세션과 로그인 실패 제한도 Redis에 저장되어 여러 Pod 사이에서 공유됨
+- Claude auth runtime state도 Redis에 동기화되어 여러 프록시 Pod가 같은 Claude 인증을 사용함
 
 외부 Redis를 쓰려면 내부 Redis를 끄고 `env.REDIS_URL` 을 지정합니다.
 

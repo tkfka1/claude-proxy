@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-proxy-test-'));
 process.env.CLAUDE_BIN = path.join(__dirname, 'fixtures', 'mock-claude.js');
+process.env.CLAUDE_AUTH_DIR = path.join(tempDir, '.claude');
+process.env.CLAUDE_AUTH_REDIS_SYNC = 'false';
 process.env.ENABLE_REQUEST_LOGGING = 'false';
 process.env.ALLOW_MISSING_API_KEY_HEADER = 'true';
 process.env.WEB_PASSWORD = 'docs-secret';
