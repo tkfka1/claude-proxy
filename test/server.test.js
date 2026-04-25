@@ -299,6 +299,10 @@ test('POST /login creates a session and grants access to the docs page', async (
   const body = await response.text();
   assert.match(body, /Claude Proxy/);
   assert.doesNotMatch(body, /Control room/);
+  assert.match(body, /System status/);
+  assert.match(body, /id="system-status-refresh"/);
+  assert.match(body, /id="system-status-grid"/);
+  assert.match(body, /href="#system-status"/);
   assert.match(body, /Routes/);
   assert.match(body, /POST/);
   assert.match(body, /\/v1\/messages/);

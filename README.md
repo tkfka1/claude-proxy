@@ -146,6 +146,8 @@ Claude CLI 로그인 상태를 확인하고, 웹에서 `claude auth login` / `lo
 콘솔 비밀번호와 런타임 `x-api-key` 값도 바로 바꿀 수 있습니다.
 모바일에서는 빠른 이동 탭, 터치 크기 버튼, PWA manifest, 예제/호출 결과 복사,
 프롬프트 빠른 선택을 지원합니다.
+운영 콘솔의 `System status` 패널은 `/ready` 응답을 이용해 Redis, 최근 로그 저장소,
+메시지 큐, Claude auth sync 상태를 한 화면에서 보여줍니다.
 
 JSON 메타 정보가 필요하면:
 

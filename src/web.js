@@ -753,6 +753,64 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         flex: 1 1 180px;
       }
 
+      .system-status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .system-status-card {
+        min-height: 112px;
+        display: grid;
+        gap: 8px;
+        align-content: space-between;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .system-status-card > span {
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .system-status-value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 1rem;
+        font-weight: 950;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--muted);
+        box-shadow: 0 0 0 6px rgba(168, 176, 166, 0.09);
+      }
+
+      .status-ok .status-dot {
+        background: var(--accent);
+        box-shadow: 0 0 0 6px rgba(200, 245, 109, 0.12);
+      }
+
+      .status-warn .status-dot {
+        background: var(--warn);
+        box-shadow: 0 0 0 6px rgba(246, 198, 95, 0.12);
+      }
+
+      .status-error .status-dot {
+        background: var(--danger);
+        box-shadow: 0 0 0 6px rgba(255, 122, 112, 0.12);
+      }
+
       .log-list {
         display: grid;
         gap: 12px;
@@ -1086,14 +1144,14 @@ export function renderHomePage(config) {
       </div>
 
       <nav class="mobile-quick-nav" aria-label="빠른 이동">
-        <a href="#status">상태</a>
+        <a href="#system-status">상태</a>
         <a href="#proxy-key">키</a>
         <a href="#call-test">테스트</a>
         <a href="#logs">로그</a>
         <a href="#claude-auth">인증</a>
       </nav>
 
-      <div id="status" class="stats-grid anchor-target">
+      <div id="overview" class="stats-grid">
         <article class="stat-card">
           <span>Anthropic version</span>
           <strong>${defaultAnthropicVersion}</strong>
@@ -1111,6 +1169,27 @@ export function renderHomePage(config) {
           <strong id="web-password-note">${config.webPasswordHash ? 'hashed password' : 'password'}</strong>
         </article>
       </div>
+
+      <section id="system-status" class="panel anchor-target">
+        <div class="topbar">
+          <div>
+            <h2>System status</h2>
+            <div class="muted">/ready 기준으로 Redis, 로그 저장소, 메시지 큐, Claude auth sync를 확인합니다.</div>
+          </div>
+          <button id="system-status-refresh" type="button" class="secondary">상태 새로고침</button>
+        </div>
+        <div class="banner" style="margin-top: 16px;">
+          <div id="system-status-summary"><strong>시스템 상태 확인 중...</strong></div>
+          <div id="system-status-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
+        </div>
+        <div id="system-status-grid" class="system-status-grid" aria-live="polite">
+          <article class="system-status-card status-warn">
+            <span>Loading</span>
+            <div class="system-status-value"><i class="status-dot"></i>확인 중</div>
+            <div class="muted">초기 상태를 불러옵니다.</div>
+          </article>
+        </div>
+      </section>
 
       <section id="routes" class="panel anchor-target">
         <div class="topbar">
@@ -1318,6 +1397,10 @@ export function renderHomePage(config) {
         const proxyApiKeyPreview = document.getElementById('proxy-api-key-preview');
         const proxyApiKeyNote = document.getElementById('proxy-api-key-note');
         const webPasswordNote = document.getElementById('web-password-note');
+        const systemStatusSummary = document.getElementById('system-status-summary');
+        const systemStatusDetail = document.getElementById('system-status-detail');
+        const systemStatusGrid = document.getElementById('system-status-grid');
+        const systemStatusRefresh = document.getElementById('system-status-refresh');
         const webPasswordSummary = document.getElementById('web-password-summary');
         const webPasswordDetail = document.getElementById('web-password-detail');
         const webPasswordForm = document.getElementById('web-password-form');
@@ -1377,6 +1460,12 @@ export function renderHomePage(config) {
           return payload;
         }
 
+        async function fetchJsonWithStatus(url, options) {
+          const response = await fetch(url, options);
+          const payload = await response.json().catch(() => ({}));
+          return { response, payload };
+        }
+
         async function copyToClipboard(text) {
           if (!String(text || '').trim()) {
             throw new Error('복사할 내용이 없습니다.');
@@ -1427,6 +1516,114 @@ export function renderHomePage(config) {
             showCopyState(button, statusNode, '복사됨');
           } catch (error) {
             showCopyState(button, statusNode, error.message);
+          }
+        }
+
+        function statusLevel(healthy, neutral = false) {
+          if (neutral) return 'warn';
+          return healthy ? 'ok' : 'error';
+        }
+
+        function statusLabel(healthy, neutralLabel = '사용 안 함') {
+          if (healthy === null) return neutralLabel;
+          return healthy ? '정상' : '확인 필요';
+        }
+
+        function appendSystemStatusCard({ label, value, detail, level }) {
+          const card = document.createElement('article');
+          card.className = 'system-status-card status-' + level;
+
+          const labelNode = document.createElement('span');
+          labelNode.textContent = label;
+
+          const valueNode = document.createElement('div');
+          valueNode.className = 'system-status-value';
+          const dot = document.createElement('i');
+          dot.className = 'status-dot';
+          valueNode.append(dot, document.createTextNode(value));
+
+          const detailNode = document.createElement('div');
+          detailNode.className = 'muted';
+          detailNode.textContent = detail || '-';
+
+          card.append(labelNode, valueNode, detailNode);
+          systemStatusGrid.appendChild(card);
+        }
+
+        function renderSystemStatus(payload, httpStatus) {
+          payload = payload || {};
+          const ready = Boolean(payload && payload.ok);
+          const redis = payload && payload.redis;
+          const logs = payload && payload.logStore || {};
+          const execution = payload && payload.messageExecution || {};
+          const authSync = payload && payload.claudeAuthSync || {};
+
+          systemStatusSummary.innerHTML = ready
+            ? '<strong>시스템 Ready</strong>'
+            : '<strong>시스템 확인 필요</strong>';
+          systemStatusDetail.textContent = [
+            'HTTP ' + httpStatus,
+            'state ' + (payload.stateBackend || '-'),
+            'service ' + (payload.service || '-'),
+          ].join(' · ');
+
+          systemStatusGrid.replaceChildren();
+          appendSystemStatusCard({
+            label: 'Readiness',
+            value: ready ? 'Ready' : 'Not ready',
+            detail: ready ? '요청 처리 가능' : '하위 상태를 확인하세요',
+            level: statusLevel(ready),
+          });
+
+          appendSystemStatusCard({
+            label: 'Redis',
+            value: redis ? statusLabel(Boolean(redis.healthy)) : statusLabel(null),
+            detail: redis
+              ? ['ping ' + (redis.ping || '-'), redis.ready ? 'ready' : 'not ready'].join(' · ')
+              : 'file/local backend',
+            level: redis ? statusLevel(Boolean(redis.healthy)) : statusLevel(false, true),
+          });
+
+          appendSystemStatusCard({
+            label: 'Recent logs',
+            value: statusLabel(logs.healthy !== false),
+            detail: 'entries ' + (logs.entryCount ?? 0) + (logs.enabled ? ' · persistent' : ' · memory'),
+            level: statusLevel(logs.healthy !== false),
+          });
+
+          appendSystemStatusCard({
+            label: 'Message queue',
+            value: execution.enabled === false ? 'unlimited' : ((execution.active ?? 0) + '/' + (execution.maxConcurrent ?? '-')),
+            detail: 'queued ' + (execution.globalQueued ?? execution.queued ?? 0) + '/' + (execution.maxQueued ?? '-')
+              + ' · ' + (execution.backend || '-'),
+            level: statusLevel(execution.healthy !== false),
+          });
+
+          appendSystemStatusCard({
+            label: 'Claude auth sync',
+            value: authSync.enabled ? 'enabled' : 'disabled',
+            detail: authSync.lastAppliedAt ? ('last applied ' + new Date(authSync.lastAppliedAt).toLocaleString()) : 'no shared snapshot applied yet',
+            level: authSync.enabled ? 'ok' : 'warn',
+          });
+        }
+
+        async function refreshSystemStatus() {
+          systemStatusRefresh.disabled = true;
+          try {
+            const { response, payload } = await fetchJsonWithStatus('/ready');
+            renderSystemStatus(payload, response.status);
+          } catch (error) {
+            systemStatusSummary.innerHTML = '<strong>시스템 상태 확인 실패</strong>';
+            systemStatusDetail.textContent = error.message;
+            systemStatusGrid.replaceChildren();
+            appendSystemStatusCard({
+              label: 'Readiness',
+              value: '오류',
+              detail: error.message,
+              level: 'error',
+            });
+          } finally {
+            systemStatusRefresh.disabled = false;
           }
         }
 
@@ -1848,6 +2045,10 @@ export function renderHomePage(config) {
           void refreshRecentLogs();
         });
 
+        systemStatusRefresh.addEventListener('click', () => {
+          void refreshSystemStatus();
+        });
+
         recentLogSearch.addEventListener('input', () => {
           renderRecentLogEntries(recentLogPayload);
         });
@@ -2060,6 +2261,7 @@ export function renderHomePage(config) {
           }
         });
 
+        refreshSystemStatus();
         refreshProxyApiKeyState();
         refreshWebPasswordStatus();
         refreshRecentLogs();
