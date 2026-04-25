@@ -152,10 +152,14 @@ const recentLogStore = createRecentLogStore({
 const claudeAuthStore = stateBackend && config.claudeAuthRedisSync
   ? stateBackend.createClaudeAuthStore()
   : null;
+const claudeAuthOperationStore = stateBackend
+  ? stateBackend.createClaudeAuthOperationStore()
+  : null;
 const claudeAuthManager = createClaudeAuthManager({
   claudeBin: config.claudeBin,
   authDir: config.claudeAuthDir,
   authStore: claudeAuthStore,
+  operationStore: claudeAuthOperationStore,
 });
 const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
@@ -1101,7 +1105,7 @@ function handleClaudeAuthOperation(req, res) {
 
     json(res, 200, {
       ok: true,
-      operation: claudeAuthManager.getOperation(),
+      operation: await claudeAuthManager.getOperation(),
     });
   })();
 }
@@ -1117,7 +1121,7 @@ async function handleClaudeAuthLogin(req, res) {
     const email = typeof body?.email === 'string' ? body.email.trim() : '';
     const sso = Boolean(body?.sso);
 
-    const operation = claudeAuthManager.startLogin({
+    const operation = await claudeAuthManager.startLogin({
       provider,
       email,
       sso,
@@ -1131,7 +1135,7 @@ async function handleClaudeAuthLogin(req, res) {
   } catch (error) {
     log('claude auth login failed', { error: error.message }, 'error');
     jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude login.', {
-      operation: error.operation || claudeAuthManager.getOperation(),
+      operation: error.operation || await claudeAuthManager.getOperation(),
     });
   }
 }
@@ -1143,7 +1147,7 @@ function handleClaudeAuthLogout(req, res) {
     }
 
     try {
-      const operation = claudeAuthManager.startLogout();
+      const operation = await claudeAuthManager.startLogout();
       json(res, 202, {
         ok: true,
         operation,
@@ -1152,7 +1156,7 @@ function handleClaudeAuthLogout(req, res) {
     } catch (error) {
       log('claude auth logout failed', { error: error.message }, 'error');
       jsonError(res, error.statusCode || 400, error.message || 'Failed to start Claude logout.', {
-        operation: error.operation || claudeAuthManager.getOperation(),
+        operation: error.operation || await claudeAuthManager.getOperation(),
       });
     }
   })();

@@ -297,7 +297,17 @@ function finalizeOperation(operation, patch) {
   operation.links = extractUrls(operation.output);
 }
 
-export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }) {
+function cloneOperation(operation) {
+  return {
+    ...operation,
+    links: Array.isArray(operation.links) ? [...operation.links] : [],
+    options: operation.options && typeof operation.options === 'object' ? { ...operation.options } : operation.options,
+    authStatus: operation.authStatus && typeof operation.authStatus === 'object' ? { ...operation.authStatus } : operation.authStatus,
+    sharedAuth: operation.sharedAuth && typeof operation.sharedAuth === 'object' ? { ...operation.sharedAuth } : operation.sharedAuth,
+  };
+}
+
+export function createClaudeAuthManager({ claudeBin, authDir, authStore = null, operationStore = null }) {
   const resolvedAuthDir = authDir ? path.resolve(authDir) : null;
   let lastAppliedSharedAuthUpdatedAt = null;
   let currentOperation = {
@@ -315,8 +325,39 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     options: null,
   };
 
-  function getOperation() {
-    return { ...currentOperation };
+  async function loadSharedOperation() {
+    if (!operationStore) {
+      return null;
+    }
+
+    return operationStore.loadState();
+  }
+
+  async function saveOperation(operation = currentOperation) {
+    if (!operationStore) {
+      return {
+        enabled: false,
+      };
+    }
+
+    await operationStore.saveState(cloneOperation(operation));
+    return {
+      enabled: true,
+      saved: true,
+    };
+  }
+
+  function saveOperationBestEffort(operation = currentOperation) {
+    void saveOperation(operation).catch(() => {});
+  }
+
+  async function getOperation() {
+    if (currentOperation.status === 'running') {
+      return cloneOperation(currentOperation);
+    }
+
+    const sharedOperation = await loadSharedOperation();
+    return cloneOperation(sharedOperation || currentOperation);
   }
 
   async function getLocalStatus() {
@@ -456,11 +497,19 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     return getLocalStatus();
   }
 
-  function startOperation(kind, args, options = {}) {
+  async function startOperation(kind, args, options = {}) {
     if (currentOperation.status === 'running') {
       throw createAuthCommandError('Another Claude auth operation is already running.', {
         statusCode: 409,
-        operation: getOperation(),
+        operation: cloneOperation(currentOperation),
+      });
+    }
+
+    const sharedOperation = await loadSharedOperation();
+    if (sharedOperation?.status === 'running') {
+      throw createAuthCommandError('Another Claude auth operation is already running.', {
+        statusCode: 409,
+        operation: sharedOperation,
       });
     }
 
@@ -480,6 +529,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     };
 
     currentOperation = operation;
+    await saveOperation(operation);
 
     const child = spawn(claudeBin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -488,10 +538,12 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
 
     child.stdout.on('data', (chunk) => {
       appendOperationLog(operation, chunk.toString('utf8'));
+      saveOperationBestEffort(operation);
     });
 
     child.stderr.on('data', (chunk) => {
       appendOperationLog(operation, chunk.toString('utf8'));
+      saveOperationBestEffort(operation);
     });
 
     child.on('error', (error) => {
@@ -500,6 +552,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
         exitCode: null,
         error: error.message,
       });
+      saveOperationBestEffort(operation);
     });
 
     child.on('close', async (code) => {
@@ -513,6 +566,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
           exitCode: code,
           error: operation.output.trim() || `claude auth ${kind} exited with code ${code}`,
         });
+        saveOperationBestEffort(operation);
         return;
       }
 
@@ -532,12 +586,13 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
           error: error.message,
         });
       }
+      saveOperationBestEffort(operation);
     });
 
-    return getOperation();
+    return cloneOperation(operation);
   }
 
-  function startLogin({ provider = 'claudeai', email = '', sso = false } = {}) {
+  async function startLogin({ provider = 'claudeai', email = '', sso = false } = {}) {
     const args = ['auth', 'login', provider === 'console' ? '--console' : '--claudeai'];
 
     if (email) {
@@ -551,7 +606,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     return startOperation('login', args, { provider, email, sso });
   }
 
-  function startLogout() {
+  async function startLogout() {
     return startOperation('logout', ['auth', 'logout']);
   }
 

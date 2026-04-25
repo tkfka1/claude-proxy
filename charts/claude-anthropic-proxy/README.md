@@ -146,6 +146,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - `/v1/messages` active concurrency와 FIFO 대기열은 Redis semaphore 기준으로 공유됩니다. readinessProbe는 `/ready` 를 사용해 Redis `PING` 실패 시 트래픽을 받지 않습니다.
 - `/docs` 에서 저장한 x-api-key, 최근 로그, 로그인 세션, 로그인 시도 제한도 Redis에 저장됩니다.
 - `claudeAuth.redisSync.enabled=true` 이면 Claude auth runtime files도 Redis에 저장되어 여러 프록시 Pod가 같은 인증 상태를 사용합니다.
+- Claude auth 로그인/로그아웃 operation 상태도 Redis에 저장되어 multi-pod Ingress 뒤에서도 `/docs` 진행 상태와 로그인 링크가 일관되게 보입니다.
 - 정상 Claude 호출 뒤에는 CLI가 갱신했을 수 있는 auth files를 Redis shared state에 다시 저장해 Pod 교체 후 stale token으로 돌아가는 리스크를 줄입니다.
 - `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.

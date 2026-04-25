@@ -120,6 +120,28 @@ function parseWebPasswordState(raw) {
   };
 }
 
+function parseClaudeAuthOperation(raw) {
+  const payload = JSON.parse(raw);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Persisted Redis Claude auth operation must be a JSON object');
+  }
+
+  return {
+    id: payload.id == null ? null : String(payload.id),
+    kind: payload.kind == null ? null : String(payload.kind),
+    status: payload.status == null ? 'idle' : String(payload.status),
+    startedAt: payload.startedAt == null ? null : String(payload.startedAt),
+    endedAt: payload.endedAt == null ? null : String(payload.endedAt),
+    output: payload.output == null ? '' : String(payload.output),
+    exitCode: payload.exitCode == null ? null : Number(payload.exitCode),
+    error: payload.error == null ? null : String(payload.error),
+    authStatus: payload.authStatus && typeof payload.authStatus === 'object' ? payload.authStatus : null,
+    sharedAuth: payload.sharedAuth && typeof payload.sharedAuth === 'object' ? payload.sharedAuth : null,
+    links: Array.isArray(payload.links) ? payload.links.map(String) : [],
+    options: payload.options && typeof payload.options === 'object' ? payload.options : null,
+  };
+}
+
 export async function createRedisStateStore({ url, keyPrefix, clientFactory = createClient }) {
   const client = clientFactory({ url });
   let lastError = null;
@@ -279,6 +301,28 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
         },
         async clearPasswordState() {
           await client.del(passwordKey);
+        },
+      };
+    },
+    createClaudeAuthOperationStore() {
+      const redisKey = buildRedisKey(keyPrefix, 'claude-auth-operation');
+
+      return {
+        async loadState() {
+          const raw = await client.get(redisKey);
+          if (!raw) {
+            return null;
+          }
+
+          return parseClaudeAuthOperation(raw);
+        },
+        async saveState(state) {
+          await client.set(redisKey, JSON.stringify(state), {
+            EX: 60 * 60 * 24,
+          });
+        },
+        async clearState() {
+          await client.del(redisKey);
         },
       };
     },

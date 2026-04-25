@@ -729,6 +729,45 @@ test('claude auth manager saves refreshed local auth files to shared state', asy
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('claude auth manager reads and respects shared running operations', async () => {
+  const operationStore = {
+    state: {
+      id: 'shared-login',
+      kind: 'login',
+      status: 'running',
+      startedAt: '2026-04-25T03:00:00.000Z',
+      endedAt: null,
+      output: 'If the browser did not open, visit: https://example.invalid/login',
+      exitCode: null,
+      error: null,
+      authStatus: null,
+      sharedAuth: null,
+      links: ['https://example.invalid/login'],
+      options: { provider: 'claudeai' },
+    },
+    async loadState() {
+      return this.state;
+    },
+    async saveState(state) {
+      this.state = state;
+    },
+  };
+  const manager = createClaudeAuthManager({
+    claudeBin: process.execPath,
+    authDir: null,
+    operationStore,
+  });
+
+  const operation = await manager.getOperation();
+
+  assert.equal(operation.status, 'running');
+  assert.equal(operation.id, 'shared-login');
+  await assert.rejects(
+    () => manager.startLogin(),
+    /Another Claude auth operation is already running/,
+  );
+});
+
 test('claude auth manager replaces invalid shared snapshots from local seed files', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-seed-'));
   const authDir = path.join(tempDir, '.claude');

@@ -320,6 +320,7 @@ kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
 - 로그인 명령 출력에서 URL이 감지되면 웹 화면에 바로 링크로 표시
 - 원격 서버에 띄운 경우 브라우저가 **서버 쪽 환경**에서 열릴 수 있으니 주의
 - Helm 기본값은 Claude auth Secret을 writable runtime volume으로 복사합니다. `values-prod.yaml` 은 각 Pod의 runtime volume을 Redis sync와 연결해 CLI token refresh와 웹 로그인 결과를 여러 Pod 사이에 공유합니다.
+- Claude auth 로그인/로그아웃 operation 상태도 Redis에 저장되어 여러 Pod 뒤의 `/docs` 화면에서 같은 진행 상태와 로그인 링크를 볼 수 있습니다.
 - 정상 Claude 호출 뒤에는 runtime auth 파일을 Redis shared state에 다시 저장해서 CLI가 갱신한 토큰이 다음 Pod 재시작에도 유지되도록 합니다.
 
 ### Claude CLI 설정
