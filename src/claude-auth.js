@@ -560,6 +560,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     getOperation,
     getSharedAuthStatus,
     syncFromStore,
+    saveToStore,
     seedStoreFromLocalIfEmpty,
     startLogin,
     startLogout,

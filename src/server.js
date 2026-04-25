@@ -1422,6 +1422,21 @@ async function syncClaudeAuthForProxyRequest(requestId) {
   }
 }
 
+async function persistClaudeAuthAfterProxyRequest(requestId) {
+  try {
+    const result = await claudeAuthManager.saveToStore();
+    if (result.saved) {
+      log('claude auth saved to shared state', {
+        requestId,
+        updatedAt: result.updatedAt,
+        fileCount: result.fileCount,
+      });
+    }
+  } catch (error) {
+    log('claude auth shared state save failed', { requestId, error: error.message }, 'error');
+  }
+}
+
 async function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
   try {
     await refreshProxyApiKeyState({ reason: 'proxy-auth' });
@@ -1662,6 +1677,7 @@ async function handleMessages(req, res) {
           releaseExecutionSlot = null;
           metrics.claudeCli.streamCompleted += 1;
           metrics.messages.streamCompleted += 1;
+          void persistClaudeAuthAfterProxyRequest(requestId);
           log('messages stream completed', {
             requestId,
             elapsed_ms: Date.now() - startedAt,
@@ -1719,6 +1735,7 @@ async function handleMessages(req, res) {
       timeoutMs: config.claudeRequestTimeoutMs,
     });
     metrics.claudeCli.jsonCompleted += 1;
+    await persistClaudeAuthAfterProxyRequest(requestId);
 
     const truncated = truncateByStopSequences(cliResult.text, stopSequences);
     const responseBody = makeAnthropicMessageResponse({

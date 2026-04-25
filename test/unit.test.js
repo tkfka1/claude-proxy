@@ -692,6 +692,43 @@ test('claude auth manager applies shared snapshots without exposing auth dir sta
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('claude auth manager saves refreshed local auth files to shared state', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-save-'));
+  const authDir = path.join(tempDir, '.claude');
+  fs.mkdirSync(authDir, { recursive: true });
+  fs.writeFileSync(path.join(authDir, '.credentials.json'), '{"token":"refreshed"}', { mode: 0o600 });
+
+  const authStore = {
+    state: null,
+    async loadState() {
+      return this.state;
+    },
+    async saveState(state) {
+      this.state = normalizeClaudeAuthSnapshot(state);
+    },
+  };
+
+  const manager = createClaudeAuthManager({
+    claudeBin: process.execPath,
+    authDir,
+    authStore,
+  });
+  const saveResult = await manager.saveToStore();
+
+  assert.equal(saveResult.saved, true);
+  assert.deepEqual(authStore.state.files.map((file) => file.path), ['.credentials.json']);
+  assert.equal(
+    authStore.state.files[0].contentBase64,
+    Buffer.from('{"token":"refreshed"}').toString('base64'),
+  );
+  assert.deepEqual(manager.getSharedAuthStatus(), {
+    enabled: true,
+    lastAppliedAt: authStore.state.updatedAt,
+  });
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 test('claude auth manager replaces invalid shared snapshots from local seed files', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-seed-'));
   const authDir = path.join(tempDir, '.claude');
