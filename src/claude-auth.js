@@ -400,7 +400,15 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
       };
     }
 
-    const existing = await authStore.loadState();
+    let existing = null;
+    let existingInvalid = false;
+
+    try {
+      existing = await authStore.loadState();
+    } catch {
+      existingInvalid = true;
+    }
+
     if (existing) {
       try {
         const normalized = normalizeClaudeAuthSnapshot(existing);
@@ -410,11 +418,11 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
           ...summarizeSharedSnapshot(normalized),
         };
       } catch {
-        // Replace legacy/corrupt shared auth state with the local seeded auth files below.
+        existingInvalid = true;
       }
     }
 
-    if (existing && !(await pathExists(resolvedAuthDir))) {
+    if (existingInvalid && !(await pathExists(resolvedAuthDir))) {
       return {
         enabled: true,
         seeded: false,
@@ -438,7 +446,7 @@ export function createClaudeAuthManager({ claudeBin, authDir, authStore = null }
     return {
       enabled: true,
       seeded: true,
-      replacedInvalid: Boolean(existing),
+      replacedInvalid: existingInvalid,
       ...summarizeSharedSnapshot(snapshot),
     };
   }

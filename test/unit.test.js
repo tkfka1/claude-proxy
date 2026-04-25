@@ -684,6 +684,48 @@ test('claude auth manager replaces invalid shared snapshots from local seed file
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('claude auth manager replaces shared snapshots when the store rejects legacy paths', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-auth-store-seed-'));
+  const authDir = path.join(tempDir, '.claude');
+  const invalidSnapshot = {
+    version: 1,
+    updatedAt: '2026-04-25T01:00:00.000Z',
+    files: [
+      {
+        path: '..2026_04_25_00_00_00/settings.json',
+        contentBase64: Buffer.from('{"theme":"bad"}').toString('base64'),
+        mode: 0o600,
+      },
+    ],
+  };
+
+  fs.mkdirSync(authDir, { recursive: true });
+  fs.writeFileSync(path.join(authDir, 'settings.json'), '{"theme":"local"}', { mode: 0o600 });
+
+  const authStore = {
+    state: invalidSnapshot,
+    async loadState() {
+      return normalizeClaudeAuthSnapshot(this.state);
+    },
+    async saveState(state) {
+      this.state = normalizeClaudeAuthSnapshot(state);
+    },
+  };
+
+  const manager = createClaudeAuthManager({
+    claudeBin: process.execPath,
+    authDir,
+    authStore,
+  });
+  const seedResult = await manager.seedStoreFromLocalIfEmpty();
+
+  assert.equal(seedResult.seeded, true);
+  assert.equal(seedResult.replacedInvalid, true);
+  assert.deepEqual(authStore.state.files.map((file) => file.path), ['settings.json']);
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 test('redis message concurrency manager enforces a global semaphore with local queueing', async () => {
   const client = new FakeRedisSemaphoreClient();
   const manager = createRedisMessageConcurrencyManager({
