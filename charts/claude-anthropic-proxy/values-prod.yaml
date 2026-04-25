@@ -10,6 +10,9 @@ service:
   port: 80
   targetPort: 8080
 
+serviceAccount:
+  automount: false
+
 resources:
   requests:
     cpu: 250m
@@ -19,13 +22,25 @@ resources:
     memory: 1Gi
 
 podDisruptionBudget:
-  enabled: false
+  enabled: true
+  minAvailable: 1
 
 autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 2
   targetCPUUtilizationPercentage: 80
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: claude-anthropic-proxy
+              app.kubernetes.io/instance: claude-proxy
+          topologyKey: kubernetes.io/hostname
 
 terminationGracePeriodSeconds: 30
 

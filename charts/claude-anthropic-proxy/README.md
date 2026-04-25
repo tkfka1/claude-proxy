@@ -147,6 +147,8 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - `claudeAuth.redisSync.enabled=true` 이면 Claude auth runtime files도 Redis에 저장되어 여러 프록시 Pod가 같은 인증 상태를 사용합니다.
 - `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
+- 운영 values는 PDB(`minAvailable=1`)와 preferred pod anti-affinity를 켜서 자발적 중단/노드 집중 리스크를 줄입니다.
+- 앱은 Kubernetes API를 쓰지 않으므로 기본 ServiceAccount token automount는 꺼져 있습니다.
 
 웹 비밀번호를 잊었거나 Secret에 보관한 값과 Redis 런타임 값을 다시 맞춰야 하면 admin CLI로 재설정합니다.
 아래 명령은 비밀번호 파일을 stdin으로 넘기고, 기존 웹 세션과 로그인 실패 카운터를 같이 정리합니다. 실행 중인 Pod는 Redis 값을 다시 읽습니다(웹 로그인은 다음 로그인/세션 확인, 프록시 인증은 최대 1초 캐시 후 반영).
@@ -206,12 +208,14 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 ## 주요 values
 
 - `image.repository`, `image.tag`
+- `serviceAccount.*`
 - `service.type`, `service.port`
 - `ingress.enabled`
 - `autoscaling.*`
 - `resources`
 - `podSecurityContext`, `securityContext`
 - `podDisruptionBudget.*`
+- `affinity`, `nodeSelector`, `tolerations`
 - `terminationGracePeriodSeconds`
 - `env.*`
 - `redis.enabled`, `redis.persistence.*`, `redis.external.*`, `redis.podSecurityContext`, `redis.securityContext`
