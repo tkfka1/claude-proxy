@@ -7,7 +7,7 @@
 - `examples/external-secret.yaml`: External Secrets Operator 예시
 - `examples/sealed-secret.yaml`: Bitnami SealedSecret 예시
 - `examples/values-ingress-cert-manager.yaml`: Ingress + cert-manager values 예시
-- `examples/values-proxy-state-pvc.yaml`: 로컬 파일 기반 state를 PVC에 유지하는 fallback 예시
+- `examples/values-proxy-state-pvc.yaml`: legacy local-file fallback 예시(운영 기본은 Redis)
 - `examples/clusterissuer-letsencrypt.yaml`: cert-manager ClusterIssuer 예시
 - `../../deploy/k8s/*.sh`: 실제 클러스터 배포용 helper script
 
@@ -15,6 +15,7 @@
 
 이 앱은 `claude` CLI 로그인 정보가 필요합니다.
 가장 쉬운 방법은 로컬 `~/.claude/.credentials.json` 을 Kubernetes Secret으로 넣는 것입니다.
+또한 서버 시작 전에 `WEB_PASSWORD` 또는 `WEB_PASSWORD_HASH` 를 실제 값으로 설정해야 합니다.
 
 ### 기존 로그인 정보로 Secret 생성
 
@@ -51,7 +52,7 @@ kubectl create secret generic claude-proxy-env \
 ```
 
 지금 기본 운영 흐름에서는 이 Secret이 **필수는 아닙니다**.
-차트가 내부 Redis를 같이 띄워 `/docs` 에서 설정한 x-api-key 와 최근 로그를 저장하므로,
+운영용 `values-prod.yaml` 은 내부 Redis를 같이 띄워 `/docs` 에서 설정한 x-api-key, 최근 로그, 문서 로그인 세션/시도 제한, 메시지 동시성 상태를 저장하므로,
 처음 부팅 후 `/docs` 에서 키를 저장하는 쪽이 기본 경로입니다.
 
 ## 설치
@@ -60,6 +61,18 @@ kubectl create secret generic claude-proxy-env \
 
 ```bash
 ./deploy/k8s/deploy-helm.sh
+```
+
+간단한 테스트 배포에서는 아래처럼 문서 화면 비밀번호를 직접 넘길 수 있습니다.
+운영에서는 shell history에 남지 않도록 `WEB_PASSWORD_HASH` 또는 `extraEnvFrom` Secret 사용을 권장합니다.
+
+```bash
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/values-prod.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set env.WEB_PASSWORD='docs-password-32chars-min-example'
 ```
 
 ## 운영용 values 예시 사용
@@ -72,7 +85,9 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   --set claudeAuth.existingSecret=claude-auth
 ```
 
-외부 Redis를 쓰고 싶으면:
+기본 설치는 내부 Redis를 같이 띄웁니다. 프록시 Pod에는 내부 Redis 주소가 `REDIS_URL` 로 자동 주입됩니다.
+
+외부 Redis를 쓰려면 내부 Redis를 끄고 `env.REDIS_URL` 을 지정합니다.
 
 ```bash
 helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
@@ -84,6 +99,22 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   --set env.REDIS_URL=redis://redis.default.svc.cluster.local:6379/0
 ```
 
+Redis URL에 비밀번호가 들어가면 values/명령줄에 직접 넣지 말고 Secret으로 주입하는 것을 권장합니다.
+
+```bash
+kubectl create secret generic claude-proxy-redis-env \
+  -n claude-proxy \
+  --from-literal=REDIS_URL='redis://:password@redis.default.svc.cluster.local:6379/0'
+
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/values-prod.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set redis.enabled=false \
+  --set redis.external.existingSecret=claude-proxy-redis-env
+```
+
 ## Ingress + cert-manager 예시
 
 ```bash
@@ -93,34 +124,18 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 ./deploy/k8s/deploy-helm.sh
 ```
 
-## x-api-key state PVC fallback 예시
+## Redis 운영 모드
 
-기본 `values-prod.yaml` 는 내부 Redis를 같이 띄워 상태를 보존합니다.
-이 기본 경로에서는 `/v1/messages` active concurrency도 Redis semaphore 기준으로 공유되고, 대기열도 Redis에 올라갑니다.
-또한 `/docs` 로그인 세션과 로그인 시도 제한도 pod 사이에서 Redis를 통해 공유됩니다.
-Redis 대신 로컬 파일 + PVC fallback 모드가 필요할 때만 아래 예시를 씁니다.
+이 차트의 기본 운영 모드는 Redis입니다.
 
-이 예시는 single replica 기준입니다.
-아래 예시는 기본값을 더 작은 values 파일로 켜는 예시입니다.
+- 내부 Redis: `redis.enabled=true` 일 때 chart가 Redis StatefulSet/Service/PVC를 같이 생성하고 프록시에 `REDIS_URL` 을 자동 주입합니다.
+- 외부 Redis: `redis.enabled=false` 로 내부 Redis를 끄고 `env.REDIS_URL` 을 직접 지정하거나 `redis.external.existingSecret` 으로 Secret을 참조합니다.
+- `/v1/messages` active concurrency와 FIFO 대기열은 Redis semaphore 기준으로 공유됩니다. readinessProbe는 `/ready` 를 사용해 Redis `PING` 실패 시 트래픽을 받지 않습니다.
+- `/docs` 에서 저장한 x-api-key, 최근 로그, 로그인 세션, 로그인 시도 제한도 Redis에 저장됩니다.
+- `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
+- Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
 
-기본 안전장치는 single replica 기준입니다.
-`proxyState.persistence.enabled=true` 일 때는:
-
-- `replicaCount=1`
-- 또는 `autoscaling.minReplicas=1`
-
-이어야 하고, 여러 replica를 정말 써야 하면 `proxyState.persistence.allowSharedState=true` 를 명시해서
-shared filesystem/race 조건을 직접 감수해야 합니다.
-
-예:
-
-```bash
-helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
-  -n claude-proxy \
-  --create-namespace \
-  -f charts/claude-anthropic-proxy/examples/values-proxy-state-pvc.yaml \
-  --set claudeAuth.existingSecret=claude-auth
-```
+legacy local-file fallback이 꼭 필요하면 `examples/values-proxy-state-pvc.yaml` 를 참고할 수 있지만, 운영 기본 경로는 Redis입니다.
 
 ## ExternalSecret 예시
 
@@ -168,8 +183,9 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `autoscaling.*`
 - `resources`
 - `podDisruptionBudget.*`
+- `terminationGracePeriodSeconds`
 - `env.*`
-- `redis.enabled`, `redis.persistence.*`
+- `redis.enabled`, `redis.persistence.*`, `redis.external.*`
 - `proxyApiKey.value`
 - `proxyApiKey.existingSecret`
 - `proxyState.persistence.*`
@@ -188,6 +204,12 @@ env:
   CLAUDE_DEFAULT_MODEL: sonnet
   ENABLE_REQUEST_LOGGING: "false"
   ALLOW_MISSING_API_KEY_HEADER: "false"
+  WEB_PASSWORD: docs-password-32chars-min-example
+
+proxyState:
+  persistence:
+    enabled: false
+
 redis:
   enabled: true
   persistence:

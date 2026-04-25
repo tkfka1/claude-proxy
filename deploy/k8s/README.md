@@ -7,6 +7,7 @@
 - `kubectl`, `helm` 설치
 - 현재 kube-context 가 대상 클러스터를 가리킴
 - Claude CLI 로그인 정보가 로컬 `~/.claude` 에 존재
+- 서버 시작 전에 `WEB_PASSWORD` 또는 `WEB_PASSWORD_HASH` 를 실제 값으로 설정해야 함
 - 이미지 기본값은 `ghcr.io/tkfka1/claude-proxy:1.1.0`
 - `main` push 가 성공하면 GHCR 에 `ghcr.io/tkfka1/claude-proxy:main` 도 자동 갱신됨
 
@@ -43,7 +44,8 @@ PROXY_API_KEY='replace-with-strong-random-value' \
 - secret name: `claude-proxy-env`
 
 지금 기본 운영 경로에서는 **필수 아님** 입니다.
-차트가 Redis에 `/docs` x-api-key 상태와 최근 로그를 같이 유지하므로, 첫 배포 후 `/docs` 에 로그인해서 키를 한 번 저장하면 됩니다.
+차트가 기본으로 내부 Redis에 `/docs` x-api-key 상태, 최근 로그, 문서 로그인 세션/시도 제한, 메시지 동시성 상태를 유지하므로,
+첫 배포 후 `/docs` 에 로그인해서 키를 한 번 저장하면 됩니다.
 이 스크립트는 "처음부터 env/Secret으로 키를 넣고 시작하고 싶다"는 경우에만 optional bootstrap 용도로 씁니다.
 
 ## 3) Helm 배포
@@ -51,6 +53,19 @@ PROXY_API_KEY='replace-with-strong-random-value' \
 ```bash
 ./deploy/k8s/deploy-helm.sh
 ```
+
+문서 화면 비밀번호는 secret 관리 방식에 맞게 설정합니다. 간단한 테스트 배포라면:
+
+```bash
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/values-prod.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set env.WEB_PASSWORD='docs-password-32chars-min-example'
+```
+
+운영에서는 shell history에 남지 않도록 `WEB_PASSWORD_HASH` 또는 `extraEnvFrom` Secret 사용을 권장합니다.
 
 기본값:
 
@@ -62,6 +77,7 @@ PROXY_API_KEY='replace-with-strong-random-value' \
 
 - `claudeAuth.existingSecret=claude-auth`
 - `redis.enabled=true`
+- `proxyState.persistence.enabled=false`
 - `proxyApiKey` secret 기본값은 비워 둠
 
 ### dry-run
@@ -79,17 +95,20 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 
 ### 기본 운영 동작
 
-`values-prod.yaml` 는 이제 Redis 친화적인 단일 replica 시작점입니다.
+`values-prod.yaml` 는 내부 Redis를 같이 올리는 운영 시작점입니다.
 
-- chart 내부 Redis가 같이 뜨고 `/docs` 에서 저장한 x-api-key, 최근 로그, 로그인 세션/시도 제한이 Redis에 유지됨
-- `/v1/messages` 실행 슬롯도 Redis 기준으로 공유되므로 여러 pod에서 active concurrency를 같이 셈
-- 대기열도 Redis에 올라가지만, pod 하나가 너무 많은 대기 요청을 쌓지 않게 local queue cap도 같이 유지
+- chart 내부 Redis StatefulSet/Service/PVC가 같이 뜸
+- 프록시 Pod에는 내부 Redis 주소가 `REDIS_URL` 로 자동 주입됨
+- `/v1/messages` 실행 슬롯과 FIFO 대기열은 Redis 기반 전역 semaphore로 관리됨
+- `MAX_CONCURRENT_MESSAGE_REQUESTS`, `MAX_QUEUED_MESSAGE_REQUESTS`, `MAX_MESSAGE_QUEUE_WAIT_MS` 로 전역 동시성/큐를 제어
+- `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인 가능
+- Pod 종료 시 SIGTERM graceful shutdown으로 새 요청을 막고 큐/in-flight CLI process/Redis 연결을 정리
 - 초기엔 `/v1/messages` 가 잠겨 있고
-- `/docs` 에 로그인해서 x-api-key 를 한 번 저장하면 이후 재시작해도 그대로 유지됨
-- `/logs/recent` 및 `/docs` 최근 로그 패널도 재시작 후 이어짐
+- `/docs` 에 로그인해서 x-api-key 를 한 번 저장하면 이후 재시작해도 Redis에 유지됨
+- `/logs/recent` 및 `/docs` 최근 로그 패널도 Redis에 저장되어 재시작 후 이어짐
+- `/docs` 로그인 세션과 로그인 실패 제한도 Redis에 저장되어 여러 Pod 사이에서 공유됨
 
-Redis를 외부로 빼고 싶으면 `env.REDIS_URL` 만 override 하면 됩니다.
-예:
+외부 Redis를 쓰려면 내부 Redis를 끄고 `env.REDIS_URL` 을 지정합니다.
 
 ```bash
 helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
@@ -97,7 +116,42 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
   --create-namespace \
   -f charts/claude-anthropic-proxy/values-prod.yaml \
   --set claudeAuth.existingSecret=claude-auth \
+  --set redis.enabled=false \
   --set env.REDIS_URL=redis://redis.default.svc.cluster.local:6379/0
+```
+
+Redis URL에 비밀번호가 들어가면 values/명령줄에 직접 넣지 말고 Secret으로 주입하는 것을 권장합니다.
+
+```bash
+kubectl create secret generic claude-proxy-redis-env \
+  -n claude-proxy \
+  --from-literal=REDIS_URL='redis://:password@redis.default.svc.cluster.local:6379/0'
+
+helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
+  -n claude-proxy \
+  --create-namespace \
+  -f charts/claude-anthropic-proxy/values-prod.yaml \
+  --set claudeAuth.existingSecret=claude-auth \
+  --set redis.enabled=false \
+  --set redis.external.existingSecret=claude-proxy-redis-env
+```
+
+스크립트로 외부 Redis를 지정하려면:
+
+```bash
+EXTERNAL_REDIS_URL=redis://redis.default.svc.cluster.local:6379/0 \
+./deploy/k8s/deploy-helm.sh
+```
+
+비밀번호가 포함된 외부 Redis는 Secret을 만들고 스크립트에 Secret 이름만 넘기는 쪽을 권장합니다.
+
+```bash
+kubectl create secret generic claude-proxy-redis-env \
+  -n claude-proxy \
+  --from-literal=REDIS_URL='redis://:password@redis.default.svc.cluster.local:6379/0'
+
+EXTERNAL_REDIS_SECRET=claude-proxy-redis-env \
+./deploy/k8s/deploy-helm.sh
 ```
 
 ### 이미지/secret 이름 오버라이드
