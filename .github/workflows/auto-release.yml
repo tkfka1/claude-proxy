@@ -1,0 +1,249 @@
+name: Auto Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Auto version, tag, and publish
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       !contains(github.event.workflow_run.display_title, '[skip auto-release]'))
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Decide next version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          head_sha="$(git rev-parse HEAD)"
+          latest_tag="$(git tag --merged HEAD --sort=-v:refname 'v[0-9]*.[0-9]*.[0-9]*' | head -1 || true)"
+          if [[ -n "$latest_tag" && "$(git rev-parse "$latest_tag^{commit}")" == "$head_sha" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Latest tag $latest_tag already points at HEAD. Nothing to release."
+            exit 0
+          fi
+
+          if git log -1 --format=%s | grep -Fq '[skip auto-release]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "HEAD is an auto-release version bump commit. Nothing to release."
+            exit 0
+          fi
+
+          range="HEAD"
+          if [[ -n "$latest_tag" ]]; then
+            range="$latest_tag..HEAD"
+          fi
+
+          messages="$(git log --format='%s%n%b' "$range")"
+          release_diff="$(git diff "$range" -- src/config.js README.md .env.example charts deploy docker-compose.yml docker-compose.external-redis.yml)"
+          bump="patch"
+          if grep -Eiq 'BREAKING CHANGE|^[a-z]+(\([^)]+\))?!:' <<< "$messages"; then
+            bump="major"
+          elif grep -Eiq 'REDIS_URL is required|Redis backend is required|운영.*필수|required.*Redis' <<< "$release_diff"; then
+            bump="major"
+          elif grep -Eiq '^(feat|feature)(\([^)]+\))?:|^Add |^Create |^Introduce ' <<< "$messages"; then
+            bump="minor"
+          fi
+
+          current_version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          next_version="$(CURRENT_VERSION="$current_version" BUMP="$bump" node <<'NODE'
+          const version = process.env.CURRENT_VERSION;
+          const bump = process.env.BUMP;
+          const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+          if (!match) {
+            throw new Error(`package.json version must be MAJOR.MINOR.PATCH, got ${version}`);
+          }
+          let [, major, minor, patch] = match.map(Number);
+          if (bump === 'major') {
+            major += 1;
+            minor = 0;
+            patch = 0;
+          } else if (bump === 'minor') {
+            minor += 1;
+            patch = 0;
+          } else {
+            patch += 1;
+          }
+          console.log(`${major}.${minor}.${patch}`);
+          NODE
+          )"
+
+          if git rev-parse "v$next_version" >/dev/null 2>&1; then
+            echo "::error::Computed tag v$next_version already exists. Refusing to overwrite it."
+            exit 1
+          fi
+
+          npm version "$next_version" --no-git-tag-version
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.version.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Run tests
+        if: steps.version.outputs.skip != 'true'
+        run: npm test
+        env:
+          ALLOW_LOCAL_STATE_BACKEND: "true"
+
+      - name: Verify npm package contents
+        if: steps.version.outputs.skip != 'true'
+        run: npm run pack:dry-run
+
+      - name: Commit and tag version
+        if: steps.version.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add package.json package-lock.json
+          git commit -m "Release v${{ steps.version.outputs.version }} [skip auto-release]"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish package to npm
+        if: steps.version.outputs.skip != 'true' && env.NPM_TOKEN != ''
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+
+      - name: Skip npm publish
+        if: steps.version.outputs.skip != 'true' && env.NPM_TOKEN == ''
+        run: echo "NPM_TOKEN is not configured; skipping npm publish for this auto-release."
+
+      - name: Decide container registries
+        if: steps.version.outputs.skip != 'true'
+        id: registries
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          IMAGE_LINES="ghcr.io/${GITHUB_REPOSITORY}"
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            IMAGE_LINES="${IMAGE_LINES}"$'\n'"docker.io/${DOCKERHUB_USERNAME}/claude-proxy"
+            echo "dockerhub_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "images<<EOF"
+            echo "$IMAGE_LINES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        if: steps.version.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.version.outputs.skip != 'true' && steps.registries.outputs.dockerhub_enabled == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        if: steps.version.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.version.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Compute release image tags
+        if: steps.version.outputs.skip != 'true'
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          major_minor="$(printf '%s' "$version" | awk -F. '{print $1"."$2}')"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          {
+            echo "tags<<EOF"
+            while IFS= read -r image; do
+              [ -z "$image" ] && continue
+              echo "${image}:latest"
+              echo "${image}:${version}"
+              echo "${image}:${major_minor}"
+              echo "${image}:sha-${short_sha}"
+            done <<< "${{ steps.registries.outputs.images }}"
+            echo "EOF"
+            echo "labels<<EOF"
+            echo "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+            echo "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+            echo "org.opencontainers.image.ref.name=${{ steps.version.outputs.tag }}"
+            echo "org.opencontainers.image.version=${version}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push release images
+        if: steps.version.outputs.skip != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          labels: ${{ steps.image.outputs.labels }}
+          provenance: true
+          push: true
+          sbom: true
+          tags: ${{ steps.image.outputs.tags }}
+
+      - name: Create GitHub release
+        if: steps.version.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: main
