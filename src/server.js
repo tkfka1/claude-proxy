@@ -27,7 +27,7 @@ import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { createScryptPasswordHash, validateNewWebPassword, verifyWebPassword } from './web-auth.js';
-import { faviconIco, faviconSvg, renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
+import { faviconIco, faviconSvg, manifestJson, renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
 
 const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
@@ -368,7 +368,15 @@ function shouldAddAccessLog(req) {
 
   // These endpoints are usually hit by probes or by the log panel itself.
   // Keeping them out prevents the UI from becoming a self-refresh log storm.
-  return !['/health', '/ready', '/metrics', '/logs/recent', '/favicon.svg', '/favicon.ico'].includes(pathname);
+  return ![
+    '/health',
+    '/ready',
+    '/metrics',
+    '/logs/recent',
+    '/favicon.svg',
+    '/favicon.ico',
+    '/manifest.webmanifest',
+  ].includes(pathname);
 }
 
 function accessLogLevel(statusCode) {
@@ -1805,6 +1813,14 @@ function requestHandler(req, res) {
 
   if (req.method === 'GET' && pathname === '/favicon.ico') {
     binary(res, 200, faviconIco, 'image/x-icon');
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/manifest.webmanifest') {
+    json(res, 200, manifestJson, {
+      'content-type': 'application/manifest+json; charset=utf-8',
+      'cache-control': 'public, max-age=86400',
+    });
     return;
   }
 

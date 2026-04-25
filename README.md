@@ -144,6 +144,8 @@ http://localhost:8080/docs
 `WEB_PASSWORD_HASH` 가 반드시 필요합니다. 로그인 후에는 문서 화면에서
 Claude CLI 로그인 상태를 확인하고, 웹에서 `claude auth login` / `logout` 을 실행하고,
 콘솔 비밀번호와 런타임 `x-api-key` 값도 바로 바꿀 수 있습니다.
+모바일에서는 빠른 이동 탭, 터치 크기 버튼, PWA manifest, 예제/호출 결과 복사,
+프롬프트 빠른 선택을 지원합니다.
 
 JSON 메타 정보가 필요하면:
 
@@ -284,6 +286,8 @@ kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
 - Redis에 저장되므로 서버/Pod를 재시작해도 다시 불러오며, admin CLI로 외부 재설정한 값도 실행 중인 Pod에 자동 반영됨
 - `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, Redis에 저장된 값이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
+- Message/Stream 예제와 호출 테스트 결과는 복사 버튼으로 바로 가져갈 수 있음
+- 호출 테스트 프롬프트는 모바일에서도 빠르게 고를 수 있는 preset chip을 제공
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
 - 최근 로그 패널은 검색, 레벨 필터, 자동 새로고침 on/off, JSON 저장, 로그 비우기를 지원
 - HTTP access log는 method/path/status/duration을 남기되 `/logs/recent`, `/health`, `/ready`, `/metrics` 같은 poll/probe 경로는 제외해서 노이즈를 줄임

@@ -224,11 +224,13 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.doesNotMatch(body, /WEB_PASSWORD/);
   assert.doesNotMatch(body, /WEB_PASSWORD_HASH/);
   assert.doesNotMatch(body, /들어가면 보이는 것/);
+  assert.match(body, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" \/>/);
+  assert.match(body, /<link rel="manifest" href="\/manifest\.webmanifest\?v=[a-f0-9]{12}" \/>/);
   assert.match(body, /<link rel="icon" href="\/favicon\.svg\?v=[a-f0-9]{12}" type="image\/svg\+xml" \/>/);
   assert.match(body, /<link rel="shortcut icon" href="\/favicon\.ico\?v=[a-f0-9]{12}" \/>/);
 });
 
-test('GET /favicon serves the Claude Proxy icon without polluting recent logs', async () => {
+test('GET /favicon and manifest serve Claude Proxy assets without polluting recent logs', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
   const cookie = await loginDocs(baseUrl);
 
@@ -249,6 +251,15 @@ test('GET /favicon serves the Claude Proxy icon without polluting recent logs', 
   assert.equal(versionedIcoResponse.status, 200);
   assert.match(versionedIcoResponse.headers.get('content-type') || '', /^image\/x-icon\b/);
 
+  const manifestResponse = await fetch(`${baseUrl}/manifest.webmanifest?v=test-cache-bust`);
+  assert.equal(manifestResponse.status, 200);
+  assert.match(manifestResponse.headers.get('content-type') || '', /^application\/manifest\+json\b/);
+  const manifestBody = await manifestResponse.json();
+  assert.equal(manifestBody.name, 'Claude Proxy');
+  assert.equal(manifestBody.start_url, '/docs');
+  assert.equal(manifestBody.display, 'standalone');
+  assert.equal(manifestBody.icons.some((icon) => icon.src === '/favicon.svg'), true);
+
   const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
     headers: {
       cookie,
@@ -257,6 +268,7 @@ test('GET /favicon serves the Claude Proxy icon without polluting recent logs', 
   const logsBody = await logsResponse.json();
   assert.equal(logsBody.entries.some((entry) => entry.details?.path === '/favicon.svg'), false);
   assert.equal(logsBody.entries.some((entry) => entry.details?.path === '/favicon.ico'), false);
+  assert.equal(logsBody.entries.some((entry) => entry.details?.path === '/manifest.webmanifest'), false);
 });
 
 test('POST /login creates a session and grants access to the docs page', async () => {
@@ -292,11 +304,15 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /\/v1\/messages/);
   assert.match(body, /Message/);
   assert.match(body, /Claude session/);
+  assert.match(body, /class="mobile-quick-nav"/);
   assert.match(body, /SSO 강제 사용/);
   assert.match(body, /키 저장/);
   assert.match(body, /새 키 발급/);
   assert.match(body, /Call test/);
   assert.match(body, /id="call-test-form"/);
+  assert.match(body, /id="call-test-copy"/);
+  assert.match(body, /data-prompt="현재 프록시 호출이 정상인지 한 문장으로 답해줘\."/);
+  assert.match(body, /data-copy-target="message-example"/);
   assert.match(body, /호출 테스트/);
   assert.match(body, /로그 검색/);
   assert.match(body, /JSON 저장/);

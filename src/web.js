@@ -19,6 +19,31 @@ export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 </svg>
 `;
 
+export const manifestJson = {
+  name: 'Claude Proxy',
+  short_name: 'Claude Proxy',
+  description: 'Claude Proxy',
+  id: '/docs',
+  start_url: '/docs',
+  scope: '/',
+  display: 'standalone',
+  background_color: '#070806',
+  theme_color: '#070806',
+  icons: [
+    {
+      src: '/favicon.svg',
+      sizes: 'any',
+      type: 'image/svg+xml',
+      purpose: 'any maskable',
+    },
+    {
+      src: '/favicon.ico',
+      sizes: '48x48',
+      type: 'image/x-icon',
+    },
+  ],
+};
+
 const faviconVersion = crypto
   .createHash('sha256')
   .update(faviconIco)
@@ -44,10 +69,15 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#070806" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Claude Proxy" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest?v=${faviconVersion}" />
     <link rel="icon" href="/favicon.svg?v=${faviconVersion}" type="image/svg+xml" />
     <link rel="shortcut icon" href="/favicon.ico?v=${faviconVersion}" />
+    <link rel="apple-touch-icon" href="/favicon.svg?v=${faviconVersion}" />
     <title>${escapeHtml(title)}</title>
     <style>
       :root {
@@ -71,13 +101,17 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
 
       * { box-sizing: border-box; }
 
-      html { min-height: 100%; }
+      html {
+        min-height: 100%;
+        scroll-behavior: smooth;
+      }
 
       body {
         min-height: 100vh;
         margin: 0;
         font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
         color: var(--text);
+        -webkit-text-size-adjust: 100%;
         background:
           radial-gradient(circle at 18% 12%, rgba(200, 245, 109, 0.15), transparent 26rem),
           radial-gradient(circle at 88% 8%, rgba(242, 179, 93, 0.13), transparent 22rem),
@@ -102,7 +136,7 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         z-index: 1;
         width: min(1180px, calc(100vw - 32px));
         margin: 0 auto;
-        padding: 40px 0 72px;
+        padding: max(40px, env(safe-area-inset-top)) 0 calc(72px + env(safe-area-inset-bottom));
       }
 
       .login-page main {
@@ -575,6 +609,7 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         color: var(--accent-ink);
         font-weight: 900;
         cursor: pointer;
+        touch-action: manipulation;
         transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
       }
 
@@ -646,6 +681,63 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         gap: 10px;
         flex-wrap: wrap;
         justify-content: flex-end;
+      }
+
+      .mobile-quick-nav {
+        display: none;
+      }
+
+      .anchor-target {
+        scroll-margin-top: 96px;
+      }
+
+      .panel-actions,
+      .button-row,
+      .output-toolbar,
+      .prompt-chips {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .panel-actions {
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .button-row {
+        align-items: center;
+      }
+
+      .output-toolbar {
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 16px;
+      }
+
+      .output-toolbar + pre {
+        margin-top: 10px;
+      }
+
+      .prompt-chips {
+        margin: 10px 0 0;
+      }
+
+      .prompt-chip,
+      .copy-button {
+        min-height: 38px;
+        padding: 8px 11px;
+        color: var(--text);
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.055);
+        font-size: 0.84rem;
+      }
+
+      .copy-feedback {
+        min-height: 1.2em;
+        color: var(--accent);
+        font-size: 0.86rem;
+        font-weight: 800;
       }
 
       .log-controls {
@@ -736,8 +828,126 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         .top-actions { justify-content: flex-start; }
       }
 
+      @media (max-width: 720px) {
+        .console-page .shell {
+          gap: 14px;
+        }
+
+        .mobile-quick-nav {
+          position: sticky;
+          top: max(8px, env(safe-area-inset-top));
+          z-index: 4;
+          display: flex;
+          gap: 8px;
+          margin: -4px -4px 2px;
+          padding: 8px;
+          overflow-x: auto;
+          border: 1px solid var(--line);
+          border-radius: 18px;
+          background: rgba(6, 8, 6, 0.84);
+          box-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
+          backdrop-filter: blur(18px);
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+
+        .mobile-quick-nav::-webkit-scrollbar {
+          display: none;
+        }
+
+        .mobile-quick-nav a {
+          flex: 0 0 auto;
+          min-height: 38px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 8px 12px;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          color: var(--text);
+          background: rgba(255, 255, 255, 0.055);
+          font-size: 0.84rem;
+          font-weight: 900;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+
+        .stats-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .stat-card {
+          min-height: 96px;
+          padding: 16px;
+        }
+
+        .panel {
+          padding: 18px;
+        }
+
+        .endpoint-list.compact {
+          grid-template-columns: 1fr;
+        }
+
+        .split {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar,
+        .panel-actions,
+        .button-row,
+        .output-toolbar,
+        .log-controls {
+          align-items: stretch;
+          width: 100%;
+        }
+
+        .top-actions,
+        .panel-actions,
+        .button-row,
+        .log-controls {
+          justify-content: stretch;
+        }
+
+        .top-actions button,
+        .panel-actions button,
+        .button-row button,
+        .log-controls button,
+        form > button {
+          width: 100%;
+        }
+
+        .prompt-chip,
+        .copy-button {
+          flex: 1 1 130px;
+        }
+
+        .log-controls label {
+          min-width: 100%;
+          flex-basis: 100%;
+        }
+
+        .log-list {
+          max-height: 420px;
+        }
+
+        pre {
+          max-height: 340px;
+          padding: 14px;
+          font-size: 0.84rem;
+        }
+
+        #call-test-output {
+          max-height: 280px;
+        }
+      }
+
       @media (max-width: 560px) {
-        main { width: min(100% - 20px, 1180px); padding: 10px 0 28px; }
+        main {
+          width: min(100% - 20px, 1180px);
+          padding: max(10px, env(safe-area-inset-top)) 0 calc(28px + env(safe-area-inset-bottom));
+        }
         .shell { border-radius: 22px; padding: 20px; }
         .login-page .shell { border-radius: 24px; }
         .login-hero, .login-card { padding: 24px; }
@@ -748,7 +958,7 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         .node-api { left: 0; top: 8px; }
         .node-auth { right: 0; top: 106px; }
         .node-logs { left: 0; bottom: 8px; }
-        .split { grid-template-columns: 1fr; }
+        .wordmark { letter-spacing: 0.04em; }
       }
     </style>
   </head>
@@ -875,7 +1085,15 @@ export function renderHomePage(config) {
         <form method="post" action="/logout" class="top-actions"><button type="submit" class="secondary">로그아웃</button></form>
       </div>
 
-      <div class="stats-grid">
+      <nav class="mobile-quick-nav" aria-label="빠른 이동">
+        <a href="#status">상태</a>
+        <a href="#proxy-key">키</a>
+        <a href="#call-test">테스트</a>
+        <a href="#logs">로그</a>
+        <a href="#claude-auth">인증</a>
+      </nav>
+
+      <div id="status" class="stats-grid anchor-target">
         <article class="stat-card">
           <span>Anthropic version</span>
           <strong>${defaultAnthropicVersion}</strong>
@@ -894,7 +1112,7 @@ export function renderHomePage(config) {
         </article>
       </div>
 
-      <section class="panel">
+      <section id="routes" class="panel anchor-target">
         <div class="topbar">
           <div>
             <h2>Routes</h2>
@@ -908,7 +1126,7 @@ export function renderHomePage(config) {
         </ul>
       </section>
 
-      <section class="split">
+      <section id="password" class="split anchor-target">
         <article class="panel">
           <h2>Console password</h2>
           <div class="banner" style="margin-bottom: 16px;">
@@ -936,7 +1154,7 @@ export function renderHomePage(config) {
         </article>
       </section>
 
-      <section class="split">
+      <section id="proxy-key" class="split anchor-target">
         <article class="panel">
           <h2>Proxy key</h2>
           <div class="banner" style="margin-bottom: 16px;">
@@ -948,7 +1166,7 @@ export function renderHomePage(config) {
               새 x-api-key
               <input id="proxy-api-key-input" type="password" minlength="8" placeholder="8자 이상" required />
             </label>
-            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="button-row">
               <button id="proxy-api-key-submit" type="submit">키 저장</button>
               <button id="proxy-api-key-reset" type="button" class="secondary">새 키 발급</button>
             </div>
@@ -960,24 +1178,33 @@ export function renderHomePage(config) {
         </article>
       </section>
 
-      <section class="split">
+      <section id="examples" class="split anchor-target">
         <article class="panel">
-          <h2>Message</h2>
+          <div class="topbar">
+            <h2>Message</h2>
+            <button type="button" class="copy-button" data-copy-target="message-example">복사</button>
+          </div>
           <pre id="message-example">${escapeHtml(messageExample)}</pre>
         </article>
         <article class="panel">
-          <h2>Stream</h2>
+          <div class="topbar">
+            <h2>Stream</h2>
+            <button type="button" class="copy-button" data-copy-target="stream-example">복사</button>
+          </div>
           <pre id="stream-example">${escapeHtml(streamExample)}</pre>
         </article>
       </section>
 
-      <section class="panel">
+      <section id="call-test" class="panel anchor-target">
         <div class="topbar">
           <div>
             <h2>Call test</h2>
             <div class="muted">저장된 x-api-key로 /v1/messages를 실제 호출합니다.</div>
           </div>
-          <button id="call-test-submit" type="submit" form="call-test-form">호출 테스트</button>
+          <div class="panel-actions">
+            <button id="call-test-copy" type="button" class="copy-button" disabled>결과 복사</button>
+            <button id="call-test-submit" type="submit" form="call-test-form">호출 테스트</button>
+          </div>
         </div>
         <form id="call-test-form" style="margin-top: 16px;">
           <div class="split" style="align-items: end;">
@@ -994,11 +1221,20 @@ export function renderHomePage(config) {
             Prompt
             <textarea id="call-test-prompt" maxlength="2000" required>Reply only OK.</textarea>
           </label>
+          <div class="prompt-chips" aria-label="프롬프트 빠른 선택">
+            <button type="button" class="prompt-chip" data-prompt="Reply only OK.">OK</button>
+            <button type="button" class="prompt-chip" data-prompt="현재 프록시 호출이 정상인지 한 문장으로 답해줘.">상태 확인</button>
+            <button type="button" class="prompt-chip" data-prompt="다음 문장을 한국어 한 줄로 요약해줘: Claude Proxy 호출 테스트입니다.">한 줄 요약</button>
+          </div>
         </form>
-        <pre id="call-test-output" style="margin-top: 16px;">아직 호출 테스트를 실행하지 않았습니다.</pre>
+        <div class="output-toolbar">
+          <span class="muted">Response</span>
+          <span id="call-test-copy-status" class="copy-feedback" role="status" aria-live="polite"></span>
+        </div>
+        <pre id="call-test-output">아직 호출 테스트를 실행하지 않았습니다.</pre>
       </section>
 
-      <section class="panel">
+      <section id="logs" class="panel anchor-target">
         <div class="topbar">
           <div>
             <h2>Live logs</h2>
@@ -1034,7 +1270,7 @@ export function renderHomePage(config) {
         </div>
       </section>
 
-      <section class="split">
+      <section id="claude-auth" class="split anchor-target">
         <article class="panel">
           <h2>Claude session</h2>
           <div class="banner" style="margin-bottom: 16px;">
@@ -1057,7 +1293,7 @@ export function renderHomePage(config) {
               <input id="claude-auth-sso" name="sso" type="checkbox" />
               <span>SSO 강제 사용</span>
             </label>
-            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="button-row">
               <button id="claude-auth-login-button" type="submit">로그인 시작</button>
               <button id="claude-auth-logout-button" type="button" class="secondary">로그아웃</button>
             </div>
@@ -1095,12 +1331,16 @@ export function renderHomePage(config) {
         const proxyApiKeyReset = document.getElementById('proxy-api-key-reset');
         const messageExamplePre = document.getElementById('message-example');
         const streamExamplePre = document.getElementById('stream-example');
+        const copyButtons = Array.from(document.querySelectorAll('[data-copy-target]'));
         const callTestForm = document.getElementById('call-test-form');
         const callTestSubmit = document.getElementById('call-test-submit');
+        const callTestCopy = document.getElementById('call-test-copy');
+        const callTestCopyStatus = document.getElementById('call-test-copy-status');
         const callTestModel = document.getElementById('call-test-model');
         const callTestMaxTokens = document.getElementById('call-test-max-tokens');
         const callTestPrompt = document.getElementById('call-test-prompt');
         const callTestOutput = document.getElementById('call-test-output');
+        const promptChips = Array.from(document.querySelectorAll('[data-prompt]'));
         const recentLogSummary = document.getElementById('recent-log-summary');
         const recentLogOutput = document.getElementById('recent-log-output');
         const recentLogRefresh = document.getElementById('recent-log-refresh');
@@ -1124,6 +1364,7 @@ export function renderHomePage(config) {
         let recentLogTimer = null;
         let recentLogEntries = [];
         let recentLogPayload = { entries: [], messageExecution: {}, logStore: { healthy: true } };
+        let callTestCanCopy = false;
         let proxyApiKeyConfigured = ${JSON.stringify(Boolean(config.proxyApiKey))};
         let proxyApiKeyHeaderRequired = ${JSON.stringify(headerRequired)};
 
@@ -1134,6 +1375,59 @@ export function renderHomePage(config) {
             throw new Error(payload.error || ('Request failed: ' + response.status));
           }
           return payload;
+        }
+
+        async function copyToClipboard(text) {
+          if (!String(text || '').trim()) {
+            throw new Error('복사할 내용이 없습니다.');
+          }
+
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+          }
+
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.setAttribute('readonly', '');
+          textarea.style.position = 'fixed';
+          textarea.style.top = '-1000px';
+          textarea.style.left = '-1000px';
+          document.body.appendChild(textarea);
+          textarea.select();
+
+          try {
+            if (!document.execCommand('copy')) {
+              throw new Error('브라우저가 복사를 차단했습니다.');
+            }
+          } finally {
+            textarea.remove();
+          }
+        }
+
+        function showCopyState(button, statusNode, message) {
+          const originalText = button.dataset.originalText || button.textContent;
+          button.dataset.originalText = originalText;
+          button.textContent = message;
+          if (statusNode) {
+            statusNode.textContent = message;
+          }
+
+          setTimeout(() => {
+            button.textContent = originalText;
+            if (statusNode && statusNode.textContent === message) {
+              statusNode.textContent = '';
+            }
+          }, 1400);
+        }
+
+        async function copyElementText(target, button, statusNode) {
+          try {
+            await copyToClipboard(target.textContent || '');
+            showCopyState(button, statusNode, '복사됨');
+          } catch (error) {
+            showCopyState(button, statusNode, error.message);
+          }
         }
 
         function renderWebPasswordStatus(status) {
@@ -1254,9 +1548,20 @@ export function renderHomePage(config) {
 
         function syncCallTest(disabled) {
           callTestSubmit.disabled = disabled;
+          callTestCopy.disabled = disabled || !callTestCanCopy;
           callTestModel.disabled = disabled;
           callTestMaxTokens.disabled = disabled;
           callTestPrompt.disabled = disabled;
+          for (const chip of promptChips) {
+            chip.disabled = disabled;
+          }
+        }
+
+        function setCallTestOutput(text, canCopy) {
+          callTestCanCopy = Boolean(canCopy);
+          callTestOutput.textContent = text;
+          callTestCopy.disabled = !callTestCanCopy;
+          callTestCopyStatus.textContent = '';
         }
 
         function extractCallTestText(response) {
@@ -1457,10 +1762,32 @@ export function renderHomePage(config) {
           }
         });
 
+        for (const button of copyButtons) {
+          button.addEventListener('click', () => {
+            const target = document.getElementById(button.dataset.copyTarget || '');
+            if (!target) {
+              showCopyState(button, null, '대상 없음');
+              return;
+            }
+            void copyElementText(target, button, null);
+          });
+        }
+
+        for (const chip of promptChips) {
+          chip.addEventListener('click', () => {
+            callTestPrompt.value = chip.dataset.prompt || '';
+            callTestPrompt.focus();
+          });
+        }
+
+        callTestCopy.addEventListener('click', () => {
+          void copyElementText(callTestOutput, callTestCopy, callTestCopyStatus);
+        });
+
         callTestForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           syncCallTest(true);
-          callTestOutput.textContent = '호출 중...';
+          setCallTestOutput('호출 중...', false);
           try {
             const payload = await fetchJson('/call-test', {
               method: 'POST',
@@ -1473,10 +1800,10 @@ export function renderHomePage(config) {
                 prompt: callTestPrompt.value,
               }),
             });
-            callTestOutput.textContent = formatCallTestResult(payload);
+            setCallTestOutput(formatCallTestResult(payload), true);
             await refreshRecentLogs();
           } catch (error) {
-            callTestOutput.textContent = error.message;
+            setCallTestOutput(error.message, true);
           } finally {
             syncCallTest(false);
           }
