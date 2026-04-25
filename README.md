@@ -16,14 +16,21 @@
 
 - `POST /v1/messages`
 - `GET /v1/models`
-- `GET /health`
+- `GET /health` 프로세스 liveness 상태
+- `GET /ready` Redis 연결/readiness 상태
+- `GET /metrics` 요청/메시지/Claude CLI/Redis/키 로테이션 상태 JSON
 - `GET /` 브라우저면 `/docs` 로 리다이렉트, 비브라우저면 JSON 메타 정보
 - `GET /docs` 비밀번호 로그인 가능한 문서 화면
+- `GET /login` 문서 화면 로그인 폼
+- `POST /login` 문서 화면 로그인 세션 생성
+- `POST /logout` 문서 화면 로그인 세션 종료
 - `GET /api-info` JSON 메타 정보
 - `GET /claude-auth/status` Claude CLI 로그인 상태 조회 (문서 로그인 필요)
 - `GET /claude-auth/operation` Claude CLI 로그인/로그아웃 작업 상태 조회 (문서 로그인 필요)
 - `POST /claude-auth/login` 웹에서 Claude CLI 로그인 시작 (문서 로그인 필요)
 - `POST /claude-auth/logout` 웹에서 Claude CLI 로그아웃 시작 (문서 로그인 필요)
+- `GET /proxy-api-key` 현재 런타임 x-api-key 상태 조회 (문서 로그인 필요)
+- `POST /proxy-api-key` 런타임 x-api-key 저장/리셋 (문서 로그인 필요)
 - `GET /logs/recent` 최근 프록시 로그 + 동시성 상태 조회 (문서 로그인 필요)
 - Anthropic 스타일 JSON 응답
 - `stream: true` 요청에 대한 SSE 응답
@@ -80,7 +87,14 @@ claude auth status
 
 ### 2. `.env` 수정
 
-기본값으로도 실행 가능하지만 필요하면 수정:
+서버 시작 전 최소한 문서 화면 비밀번호를 설정해야 합니다.
+`WEB_PASSWORD` 또는 `WEB_PASSWORD_HASH` 중 하나를 실제 값으로 채웁니다.
+
+```dotenv
+WEB_PASSWORD=docs-password-32chars-min-example
+```
+
+필요하면 포트, Claude CLI 경로, 프록시 API key 정책 등도 수정합니다.
 
 ```bash
 vi .env
@@ -98,10 +112,24 @@ npm start
 http://0.0.0.0:8080
 ```
 
-### 4. health check
+### 4. health / readiness check
+
+프로세스 liveness 확인:
 
 ```bash
 curl http://localhost:8080/health
+```
+
+Redis까지 포함한 readiness 확인:
+
+```bash
+curl http://localhost:8080/ready
+```
+
+metrics 확인:
+
+```bash
+curl http://localhost:8080/metrics
 ```
 
 ### 5. 브라우저에서 열기
@@ -171,9 +199,12 @@ curl -N http://localhost:8080/v1/messages \
 - `MAX_QUEUED_MESSAGE_REQUESTS`: 실행 슬롯을 기다릴 큐 길이(기본값 `16`)
 - `MAX_MESSAGE_QUEUE_WAIT_MS`: 큐에서 기다릴 최대 시간(ms). 초과 시 `429 rate_limit_error` 반환 (기본값 `30000`, `0`이면 무기한 대기)
 - `RECENT_LOG_LIMIT`: `/docs` 와 `/logs/recent` 에서 유지할 최근 로그 개수(기본값 `200`)
-- `REDIS_URL`: Redis backend 주소. 설정하면 x-api-key state / recent logs 가 Redis로 이동
+- `CLAUDE_REQUEST_TIMEOUT_MS`: `claude` child process 전체 요청 timeout(ms). 초과 시 child process를 종료하고 `504 api_error` 반환(기본값 `300000`, `0`이면 비활성화)
+- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`: 스트리밍 중 새 CLI 이벤트가 들어오지 않을 때의 idle timeout(ms). 초과 시 SSE `error` 이벤트를 보내고 child process를 종료(기본값 `60000`, `0`이면 비활성화)
+- `SHUTDOWN_GRACE_MS`: SIGTERM/SIGINT graceful shutdown 최대 대기 시간(ms). 큐를 비우고 in-flight CLI process를 abort한 뒤 Redis/log store를 정리(기본값 `10000`)
+- `REDIS_URL`: Redis backend 주소. **운영 실행에 필수**이며 x-api-key state / recent logs / 웹 로그인 세션 / 로그인 시도 제한 / 메시지 동시성 상태를 Redis에 저장합니다. docker compose는 `redis://redis:6379/0`, 로컬 직접 실행은 예를 들어 `redis://localhost:6379/0` 를 사용합니다. Redis가 없으면 서버는 시작하지 않습니다.
 - `REDIS_KEY_PREFIX`: Redis key prefix (기본값 `claude-anthropic-proxy`)
-- `RECENT_LOG_FILE`: 최근 로그를 영속 저장할 파일 경로. 비우면 state 디렉터리의 `recent-log.json` 사용
+- `PROXY_STATE_FILE`, `RECENT_LOG_FILE`: Redis를 쓰지 않는 격리 테스트/local fallback에서만 쓰는 파일 경로입니다. 운영 기본 경로에서는 Redis가 우선합니다.
 
 ### 웹 문서 로그인 설정
 
@@ -213,22 +244,16 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `/docs` 로그인 후 문서 페이지에서 바로 설정 가능
 - 로그인 상태에서는 현재 x-api-key 원문을 바로 확인 가능
 - 저장한 값은 현재 서버 프로세스 메모리에 반영되고, 즉시 `/v1/messages` 의 `x-api-key` 검증에 사용됨
-- `리셋` 버튼은 새 랜덤 x-api-key 를 다시 발급하고 이전 키를 즉시 무효화
-- 상태 파일에 저장되므로 서버를 재시작해도 다시 불러옴
-- `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, 상태 파일이 생긴 뒤에는 저장된 값이 계속 우선함
+- `리셋` 버튼은 새 랜덤 x-api-key 를 다시 발급하고 이전 키는 grace period 동안만 임시 허용
+- `PROXY_API_KEY_GRACE_PERIOD_SECONDS`: 로테이션 직전 키를 허용할 유예 시간(기본값 `300`, `0`이면 이전 키 즉시 무효화)
+- `PROXY_API_KEY_HISTORY_LIMIT`: `/proxy-api-key` / `/metrics` 에 노출할 masked key history 개수(기본값 `5`, `0`이면 history 비활성화)
+- Redis에 저장되므로 서버/Pod를 재시작해도 다시 불러옴
+- `PROXY_API_KEY` 는 **초기 bootstrap 용도**이고, Redis에 저장된 값이 생긴 뒤에는 저장된 값이 계속 우선함
 - 빈 값 대신 8자 이상 문자열만 허용
 - `/docs` 와 `/logs/recent` 에서 최근 프록시 로그와 동시성 상태도 같이 볼 수 있음
-- 최근 로그도 state 파일에 저장되므로 재시작 후 다시 볼 수 있음
-- 최근 로그가 파일에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
-- `REDIS_URL` 이 있으면 x-api-key state 와 최근 로그를 로컬 파일 대신 Redis에 저장
-- `REDIS_URL` 이 있으면 `/docs` 로그인 세션과 로그인 시도 제한도 Redis로 공유되어, 여러 pod 사이에서도 로그인 상태가 이어짐
-- 기본 저장 경로는 `PROXY_STATE_FILE` 이 비어 있으면
-  - `$XDG_STATE_HOME/claude-anthropic-proxy/runtime-state.json`
-  - 또는 `$HOME/.local/state/claude-anthropic-proxy/runtime-state.json`
-- 최근 로그 저장 경로는 `RECENT_LOG_FILE` 이 비어 있으면
-  - `$XDG_STATE_HOME/claude-anthropic-proxy/recent-log.json`
-  - 또는 `$HOME/.local/state/claude-anthropic-proxy/recent-log.json`
-- 컨테이너 환경에서는 이 경로에 볼륨을 붙여야 재시작 후에도 유지됨
+- 최근 로그도 Redis에 저장되므로 재시작 후 다시 볼 수 있음
+- 최근 로그가 Redis에 저장될 때는 로그인 client IP / email 같은 민감 필드는 redaction 후 저장
+- `/docs` 로그인 세션과 로그인 시도 제한도 Redis에 저장되어 여러 Pod 사이에서 공유됨
 
 ### 메시지 동시성 / 큐
 
@@ -237,10 +262,17 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - 큐에서 `MAX_MESSAGE_QUEUE_WAIT_MS` 를 넘기면 `429 rate_limit_error` 로 timeout 반환
 - 스트리밍 요청도 동일한 슬롯을 점유하므로 오래 걸리는 응답이 많으면 큐 대기가 늘어날 수 있음
 - 현재 상태는 `/docs` 의 최근 로그 패널 또는 `GET /logs/recent` 에서 확인 가능
-- 기본 파일 backend에서는 동시성 제한이 **현재 프로세스/Pod 기준**
-- `REDIS_URL` 이 있으면 실행 슬롯은 **Redis 기반 전역 semaphore** 로 바뀌고, 여러 pod 사이에서도 active 개수를 공유
-- Redis backend에서는 FIFO 대기열도 Redis에 올라가며, `/logs/recent` 에서 전역 active/global queued/local queued 상태를 같이 볼 수 있음
+- 실행 슬롯은 **Redis 기반 전역 semaphore** 로 관리되어 여러 Pod 사이에서도 active 개수를 공유
+- FIFO 대기열도 Redis에 올라가며, `/logs/recent` 에서 전역 active/global queued/local queued 상태를 같이 볼 수 있음
 - 다만 `MAX_QUEUED_MESSAGE_REQUESTS` 는 여전히 **pod당 local waiting cap** 으로도 같이 쓰므로, 한 pod가 너무 많은 대기 요청을 쌓는 것은 막음
+- SIGTERM/SIGINT 시 새 요청은 `/health` 를 제외하고 `503` 으로 막고, 대기열과 진행 중인 `claude` child process를 정리한 뒤 Redis 연결을 닫음
+
+
+### health / readiness
+
+- `GET /health`: 프로세스 liveness용. Redis client 상태 요약을 포함하지만, Kubernetes livenessProbe처럼 프로세스 생존 확인에 사용합니다.
+- `GET /ready`: Redis `PING`, log store 상태, message concurrency 상태를 확인합니다. Redis가 준비되지 않으면 `503` 을 반환하므로 Kubernetes readinessProbe에 사용합니다.
+- `GET /metrics`: uptime, request status, message 성공/실패/abort, Claude CLI timeout, x-api-key rotation/grace match, Redis/log/concurrency 상태를 JSON으로 확인합니다.
 
 ### Claude CLI 웹 로그인
 
@@ -257,6 +289,7 @@ WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 - `CLAUDE_DEFAULT_MODEL`: 기본 CLI 모델 alias (`sonnet` 등)
 - `CLAUDE_MODEL_MAP_JSON`: 외부 모델명 → CLI 모델 alias 매핑 JSON 문자열
 - `CLAUDE_EXTRA_ARGS_JSON`: `claude` 실행 시 추가 인자 JSON 배열 문자열
+- `CLAUDE_REQUEST_TIMEOUT_MS`, `CLAUDE_STREAM_IDLE_TIMEOUT_MS`: 오래 걸리거나 멈춘 CLI 호출을 watchdog으로 종료
 
 예:
 
@@ -267,13 +300,15 @@ CLAUDE_EXTRA_ARGS_JSON=["--verbose"]
 
 ### 프록시 인증 설정
 
-- `PROXY_API_KEY`: 프록시 자체 API 키 초기 bootstrap 값. 첫 저장 전 기본값으로만 사용되고, 이후에는 저장된 state 값이 계속 사용됨
-- `PROXY_STATE_FILE`: `/docs` 에서 바꾼 x-api-key 를 영속 저장할 파일 경로. 비우면 기본 state 디렉터리 사용
-- `REDIS_URL`: x-api-key state / recent logs 용 Redis 주소
+- `PROXY_API_KEY`: 프록시 자체 API 키 초기 bootstrap 값. 첫 저장 전 기본값으로만 사용되고, 이후에는 Redis에 저장된 값이 계속 사용됨
+- `PROXY_STATE_FILE`: Redis를 쓰지 않는 격리 테스트/local fallback에서만 쓰는 파일 경로. 운영 기본 경로에서는 사용하지 않음
+- `REDIS_URL`: x-api-key state / recent logs / 웹 로그인 세션 / 로그인 시도 제한 / 메시지 동시성 상태를 저장할 Redis 주소
 - `REDIS_KEY_PREFIX`: Redis key namespace prefix
 - `ALLOW_MISSING_API_KEY_HEADER`: `x-api-key` 없는 요청 허용 여부
 - `REQUIRE_ANTHROPIC_VERSION`: `anthropic-version` 헤더 필수 여부
 - `DEFAULT_ANTHROPIC_VERSION`: 기본 버전 문자열
+- `PROXY_API_KEY_GRACE_PERIOD_SECONDS`: 키 로테이션 후 이전 키 유예 시간
+- `PROXY_API_KEY_HISTORY_LIMIT`: masked key history 보관 개수
 
 API 키 강제 예시:
 
@@ -283,7 +318,7 @@ ALLOW_MISSING_API_KEY_HEADER=false
 ```
 
 또는 서버를 띄운 뒤 `/docs` 에서 `x-api-key` 를 저장하면, 그 시점부터 `/v1/messages` 는
-헤더 없이는 들어오지 않고, 저장된 값은 재시작 후에도 유지됩니다.
+헤더 없이는 들어오지 않고, 저장된 값은 Redis에 남아 재시작 후에도 유지됩니다.
 
 요청 예시:
 
@@ -344,6 +379,7 @@ make k8s-create-proxy-secret
 make k8s-deploy
 make k8s-dry-run
 make compose-up
+make compose-up-external-redis
 make compose-down
 make compose-logs
 make pm2-start
@@ -575,12 +611,20 @@ docker run --rm \
 
 파일:
 
-- `docker-compose.yml`
+- `docker-compose.yml`: Redis를 같이 띄우는 기본 compose
+- `docker-compose.external-redis.yml`: 외부 Redis를 쓰는 compose
 
-실행:
+실행(내부 Redis 포함):
 
 ```bash
 docker compose up -d --build
+```
+
+외부 Redis 사용:
+
+```bash
+EXTERNAL_REDIS_URL=redis://redis.example.com:6379/0 \
+  docker compose -f docker-compose.external-redis.yml up -d --build
 ```
 
 로그 확인:
@@ -595,14 +639,15 @@ docker compose logs -f
 docker compose down
 ```
 
-기본적으로:
+기본 `docker-compose.yml` 은:
 
-- `.env` 를 컨테이너에 전달
+- Redis 컨테이너를 같이 올림
+- 프록시 컨테이너에는 `REDIS_URL=redis://redis:6379/0` 를 주입
+- Redis named volume `redis-data` 에 x-api-key, 최근 로그, 문서 로그인 세션, 로그인 시도 제한, 메시지 동시성 상태를 유지
+- `.env` 를 프록시 컨테이너에 전달
 - 호스트의 `${HOME}/.claude` 를 `/home/node/.claude` 에 read-only 마운트
-- named volume `claude-proxy-state` 를 `/home/node/.local/state/claude-anthropic-proxy` 에 마운트해서
-  `/docs` 에서 바꾼 x-api-key 도 재시작 후 유지
 
-`REDIS_URL` 을 지정하면 이 named volume 대신 Redis backend를 써도 됩니다.
+`docker-compose.external-redis.yml` 은 Redis 컨테이너를 만들지 않고 `EXTERNAL_REDIS_URL` 값을 프록시의 `REDIS_URL` 로 주입합니다.
 
 따라서 compose 를 실행하는 사용자 계정에서 `claude auth login` 이 되어 있어야 합니다.
 
@@ -668,9 +713,14 @@ deploy/k8s/
 
 ```bash
 ./deploy/k8s/create-claude-auth-secret.sh
-PROXY_API_KEY='replace-with-strong-random-value' ./deploy/k8s/create-proxy-env-secret.sh
 ./deploy/k8s/deploy-helm.sh
 ```
+
+기본 `values-prod.yaml` 은 내부 Redis를 같이 올립니다.
+`/v1/messages` 동시성/큐, `/docs` 에서 저장한 x-api-key, 최근 로그, 문서 로그인 세션/시도 제한은 Redis에 유지됩니다.
+Kubernetes readinessProbe는 `/ready`, livenessProbe는 `/health` 를 사용하고, Pod 종료 시 `terminationGracePeriodSeconds` 안에서 SIGTERM graceful shutdown을 수행합니다.
+처음부터 `PROXY_API_KEY` 를 Secret으로 넣고 싶을 때만 `deploy/k8s/create-proxy-env-secret.sh` 를 추가로 사용합니다.
+외부 Redis를 쓰려면 `EXTERNAL_REDIS_URL=redis://... ./deploy/k8s/deploy-helm.sh` 또는 Helm `--set redis.enabled=false --set env.REDIS_URL=...` 를 사용합니다.
 
 prod dry-run 예시:
 
@@ -723,6 +773,7 @@ Anthropic 스타일 에러 형식으로 응답합니다.
 - 잘못된 JSON → `invalid_request_error`
 - 미지원 필드(`tools`, `tool_choice`) → `invalid_request_error`
 - `claude` 미로그인/인증 실패 → `authentication_error`
+- `claude` CLI request/stream idle timeout → `api_error` + HTTP `504`
 - 내부 예외 → `api_error`
 
 ---
@@ -735,8 +786,20 @@ npm test
 
 현재 테스트 범위:
 
+- `/`, `/docs`, `/login`, `/logout`, `/api-info` 라우팅
+- 문서 화면 로그인 세션, 비밀번호 실패, rate limit
+- Claude CLI 로그인 상태 조회와 웹 로그인/로그아웃 작업
+- 런타임 `x-api-key` 조회, 저장, 리셋, 이전 키 grace period, 요청 인증 강제
+- 최근 로그 조회, 영속 저장, 민감 필드 redaction
+- 로컬 `/v1/messages` 동시성 제한, 큐 제한, 큐 timeout
+- Redis 기반 전역 message semaphore, Redis 대기열 timeout
+- Redis state store 기반 x-api-key / 최근 로그 저장
 - 일반 `/v1/messages` 응답
-- `stream: true` SSE 응답
+- `stream: true` SSE 응답과 idle timeout SSE error
+- `GET /metrics` 카운터/상태 응답
+- Claude CLI request timeout `504` 처리
+- 스트리밍 클라이언트 disconnect 시 슬롯 해제와 aborted 로그
 - backend 인증 실패 매핑
 - 미지원 `tools` 요청 차단
-- 프롬프트 변환 / stop sequence 처리
+- 프롬프트 변환, system prompt 정규화, stop sequence 처리
+- 웹 비밀번호 scrypt hash 생성/검증

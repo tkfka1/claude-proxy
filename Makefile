@@ -1,4 +1,4 @@
-.PHONY: install start test pack-dry-run health helm-lint helm-template helm-template-prod k8s-create-claude-secret k8s-create-proxy-secret k8s-deploy k8s-dry-run compose-up compose-down compose-logs docker-build docker-buildx docker-buildx-push docker-run pm2-start pm2-restart
+.PHONY: install start test pack-dry-run health helm-lint helm-template helm-template-prod k8s-create-claude-secret k8s-create-proxy-secret k8s-deploy k8s-dry-run compose-up compose-up-external-redis compose-down compose-logs docker-build docker-buildx docker-buildx-push docker-run pm2-start pm2-restart
 
 DOCKER_IMAGE ?= claude-anthropic-proxy
 DOCKER_TAG ?= dev
@@ -44,6 +44,9 @@ k8s-dry-run:
 
 compose-up:
 	docker compose up -d --build
+
+compose-up-external-redis:
+	docker compose -f docker-compose.external-redis.yml up -d --build
 
 compose-down:
 	docker compose down

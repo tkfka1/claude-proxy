@@ -1,4 +1,25 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: claude-anthropic-proxy-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --dir
+      - /data
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   claude-anthropic-proxy:
     build:
       context: .
@@ -6,6 +27,7 @@ services:
     image: claude-anthropic-proxy:local
     container_name: claude-anthropic-proxy
     restart: unless-stopped
+    stop_grace_period: 15s
     ports:
       - "${PORT:-8080}:8080"
     env_file:
@@ -14,9 +36,13 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8080
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: claude-anthropic-proxy
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - ${HOME}/.claude:/home/node/.claude:ro
-      - claude-proxy-state:/home/node/.local/state/claude-anthropic-proxy
 
 volumes:
-  claude-proxy-state:
+  redis-data:

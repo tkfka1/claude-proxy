@@ -9,6 +9,8 @@ const stdin = await readStdin();
 const resultText = process.env.MOCK_CLAUDE_RESULT || 'mock completion';
 const delayMs = Number.parseInt(process.env.MOCK_CLAUDE_DELAY_MS || '0', 10) || 0;
 const streamDelayMs = Number.parseInt(process.env.MOCK_CLAUDE_STREAM_DELAY_MS || '0', 10) || 0;
+const streamKeepaliveDelayMs = Number.parseInt(process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_DELAY_MS || '0', 10) || 0;
+const streamKeepaliveCount = Number.parseInt(process.env.MOCK_CLAUDE_STREAM_KEEPALIVE_COUNT || '0', 10) || 0;
 const usage = {
   input_tokens: 12,
   output_tokens: 7,
@@ -138,6 +140,12 @@ if (delayMs > 0) {
 if (outputFormat === 'stream-json') {
   emit({ type: 'system', subtype: 'init', model, cwd: process.cwd() });
   emit({ type: 'system', subtype: 'status', status: 'requesting' });
+  for (let index = 0; index < streamKeepaliveCount; index += 1) {
+    if (streamKeepaliveDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, streamKeepaliveDelayMs));
+    }
+    emit({ type: 'system', subtype: 'status', status: 'requesting', keepalive: index + 1 });
+  }
   const partialText = resultText.slice(0, Math.max(1, Math.floor(resultText.length / 2)));
   emit({
     type: 'assistant',

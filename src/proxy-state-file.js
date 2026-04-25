@@ -47,6 +47,26 @@ function normalizePersistedState(payload) {
   return {
     proxyApiKey,
     updatedAt: updatedAt || null,
+    previousApiKeys: Array.isArray(payload.previousApiKeys)
+      ? payload.previousApiKeys
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => ({
+          apiKey: String(entry.apiKey || '').trim(),
+          retiredAt: entry.retiredAt == null ? null : String(entry.retiredAt).trim(),
+          expiresAt: entry.expiresAt == null ? null : String(entry.expiresAt).trim(),
+        }))
+        .filter((entry) => entry.apiKey)
+      : [],
+    history: Array.isArray(payload.history)
+      ? payload.history
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => ({
+          maskedApiKey: entry.maskedApiKey == null ? null : String(entry.maskedApiKey),
+          activatedAt: entry.activatedAt == null ? null : String(entry.activatedAt),
+          retiredAt: entry.retiredAt == null ? null : String(entry.retiredAt),
+          expiresAt: entry.expiresAt == null ? null : String(entry.expiresAt),
+        }))
+      : [],
   };
 }
 
@@ -87,11 +107,11 @@ export function createProxyStateFileStore({ filePath }) {
       const parsed = JSON.parse(raw);
       return normalizePersistedState(parsed);
     },
-    saveState({ proxyApiKey, updatedAt }) {
+    saveState(state) {
       ensureParentDirectory();
 
       const tempPath = `${resolvedPath}.${process.pid}.${Date.now()}.tmp`;
-      const payload = `${JSON.stringify({ proxyApiKey, updatedAt }, null, 2)}\n`;
+      const payload = `${JSON.stringify(state, null, 2)}\n`;
       fs.writeFileSync(tempPath, payload, {
         mode: 0o600,
       });

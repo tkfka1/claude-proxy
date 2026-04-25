@@ -27,15 +27,22 @@ autoscaling:
   maxReplicas: 1
   targetCPUUtilizationPercentage: 80
 
+terminationGracePeriodSeconds: 30
+
 env:
   HOST: 0.0.0.0
   PORT: "8080"
+  # Required at runtime: set WEB_PASSWORD or WEB_PASSWORD_HASH with --set,
+  # extra values, or extraEnvFrom Secret before starting the pod.
   REQUEST_BODY_LIMIT_BYTES: "33554432"
   ENABLE_REQUEST_LOGGING: "false"
   MAX_CONCURRENT_MESSAGE_REQUESTS: "4"
   MAX_QUEUED_MESSAGE_REQUESTS: "16"
   MAX_MESSAGE_QUEUE_WAIT_MS: "30000"
   RECENT_LOG_LIMIT: "200"
+  CLAUDE_REQUEST_TIMEOUT_MS: "300000"
+  CLAUDE_STREAM_IDLE_TIMEOUT_MS: "60000"
+  SHUTDOWN_GRACE_MS: "10000"
   CLAUDE_BIN: claude
   CLAUDE_DEFAULT_MODEL: sonnet
   CLAUDE_MODEL_MAP_JSON: '{"claude-sonnet-4-20250514":"sonnet","claude-opus-4-20250514":"opus","claude-haiku-4-5":"haiku"}'
@@ -43,16 +50,28 @@ env:
   ALLOW_MISSING_API_KEY_HEADER: "false"
   REQUIRE_ANTHROPIC_VERSION: "true"
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
+  PROXY_API_KEY_GRACE_PERIOD_SECONDS: "300"
+  PROXY_API_KEY_HISTORY_LIMIT: "5"
 
 proxyState:
   persistence:
     enabled: false
+    size: 1Gi
 
 redis:
   enabled: true
+  external:
+    existingSecret: ""
+    existingSecretKey: REDIS_URL
   persistence:
     enabled: true
     size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 claudeAuth:
   existingSecret: claude-auth

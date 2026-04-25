@@ -33,6 +33,43 @@ const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
+const startedAt = Date.now();
+let isShuttingDown = false;
+let shutdownPromise = null;
+const activeMessageControllers = new Set();
+const metrics = {
+  requests: {
+    total: 0,
+    aborted: 0,
+    byRoute: {},
+    status: {},
+  },
+  messages: {
+    total: 0,
+    jsonCompleted: 0,
+    streamCompleted: 0,
+    failed: 0,
+    aborted: 0,
+    authFailed: 0,
+  },
+  claudeCli: {
+    jsonStarted: 0,
+    jsonCompleted: 0,
+    streamStarted: 0,
+    streamCompleted: 0,
+    failed: 0,
+    timeout: 0,
+  },
+  proxyApiKey: {
+    rotations: 0,
+    previousKeyMatches: 0,
+  },
+  shutdowns: {
+    started: 0,
+    completed: 0,
+    forced: 0,
+  },
+};
 const claudeAuthManager = createClaudeAuthManager({ claudeBin: config.claudeBin });
 const stateBackend = config.redisUrl
   ? await createRedisStateStore({
@@ -103,6 +140,8 @@ const proxyApiKeyManager = createProxyApiKeyManager({
   initialApiKey: config.proxyApiKey,
   loadedState: initialProxyApiKeyState,
   storage: proxyStateFileStore,
+  gracePeriodSeconds: config.proxyApiKeyGracePeriodSeconds,
+  historyLimit: config.proxyApiKeyHistoryLimit,
 });
 const messageConcurrencyManager = stateBackend
   ? createRedisMessageConcurrencyManager({
@@ -147,6 +186,29 @@ function log(event, details = {}, level = 'info') {
   console.log(new Date().toISOString(), event, details);
 }
 
+function incrementCounter(path, key, by = 1) {
+  path[key] = (path[key] || 0) + by;
+}
+
+function routeKey(req) {
+  return `${req.method} ${req.url}`;
+}
+
+function recordRequest(req, res) {
+  let finished = false;
+  metrics.requests.total += 1;
+  incrementCounter(metrics.requests.byRoute, routeKey(req));
+  res.on('finish', () => {
+    finished = true;
+    incrementCounter(metrics.requests.status, String(res.statusCode));
+  });
+  res.on('close', () => {
+    if (finished) return;
+    metrics.requests.aborted += 1;
+    incrementCounter(metrics.requests.status, 'aborted');
+  });
+}
+
 function isWebLoginEnabled() {
   return Boolean(config.webPassword || config.webPasswordHash);
 }
@@ -179,6 +241,94 @@ function buildServiceMetadata() {
       status: '/proxy-api-key',
       update: '/proxy-api-key',
     },
+  };
+}
+
+function getStateBackendStatus() {
+  if (stateBackend) {
+    return stateBackend.getStatus();
+  }
+
+  return {
+    enabled: false,
+    healthy: Boolean(config.allowLocalStateBackend),
+    open: false,
+    ready: Boolean(config.allowLocalStateBackend),
+    lastError: config.allowLocalStateBackend ? null : 'Redis backend is not configured',
+  };
+}
+
+async function checkStateBackendHealth() {
+  if (stateBackend) {
+    return stateBackend.checkHealth();
+  }
+
+  return {
+    enabled: false,
+    healthy: Boolean(config.allowLocalStateBackend),
+    open: false,
+    ready: Boolean(config.allowLocalStateBackend),
+    ping: null,
+    lastError: config.allowLocalStateBackend ? null : 'Redis backend is not configured',
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+function buildHealthStatus() {
+  const state = getStateBackendStatus();
+
+  return {
+    ok: true,
+    ready: state.healthy,
+    service: serviceMetadata.service,
+    stateBackend: config.stateBackend,
+    redis: config.stateBackend === 'redis' ? state : null,
+    logStore: recentLogStore.getStatus(),
+  };
+}
+
+async function buildReadinessStatus() {
+  const state = await checkStateBackendHealth();
+  const logStore = recentLogStore.getStatus();
+  const messageExecution = await messageConcurrencyManager.getLiveStatus().catch((error) => ({
+    ...messageConcurrencyManager.getStatus(),
+    healthy: false,
+    error: error.message,
+  }));
+  const messageExecutionHealthy = messageExecution.healthy !== false;
+  const ok = Boolean(state.healthy && logStore.healthy && messageExecutionHealthy);
+
+  return {
+    ok,
+    service: serviceMetadata.service,
+    stateBackend: config.stateBackend,
+    redis: config.stateBackend === 'redis' ? state : null,
+    logStore,
+    messageExecution,
+  };
+}
+
+async function buildMetricsSnapshot() {
+  const messageExecution = await messageConcurrencyManager.getLiveStatus().catch(() => messageConcurrencyManager.getStatus());
+
+  return {
+    ok: true,
+    service: serviceMetadata.service,
+    startedAt: new Date(startedAt).toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    shuttingDown: isShuttingDown,
+    requests: metrics.requests,
+    messages: metrics.messages,
+    claudeCli: metrics.claudeCli,
+    proxyApiKey: {
+      ...metrics.proxyApiKey,
+      status: buildProxyApiKeySettings(),
+    },
+    shutdowns: metrics.shutdowns,
+    stateBackend: config.stateBackend,
+    redis: config.stateBackend === 'redis' ? stateBackend.getStatus() : null,
+    logStore: recentLogStore.getStatus(),
+    messageExecution,
   };
 }
 
@@ -687,6 +837,7 @@ async function handleProxyApiKeyUpdate(req, res) {
       : proxyApiKeyManager.setApiKey(body?.apiKey));
 
     config.proxyApiKey = next.apiKey;
+    metrics.proxyApiKey.rotations += 1;
 
     json(res, 200, {
       ok: true,
@@ -741,20 +892,36 @@ function applyProxyAuth(req, requestId) {
   }
 
   if (!config.allowMissingApiKeyHeader && !apiKey) {
+    metrics.messages.authFailed += 1;
     throw new ProxyError(401, 'authentication_error', 'x-api-key header is required');
   }
 
   if (configuredProxyApiKey && !apiKey) {
+    metrics.messages.authFailed += 1;
     throw new ProxyError(401, 'authentication_error', 'x-api-key header is required');
   }
 
-  if (configuredProxyApiKey && apiKey !== configuredProxyApiKey) {
+  const apiKeyVerification = configuredProxyApiKey
+    ? proxyApiKeyManager.verifyApiKey(apiKey)
+    : { valid: true, matched: null, expiresAt: null };
+
+  if (configuredProxyApiKey && !apiKeyVerification.valid) {
+    metrics.messages.authFailed += 1;
     throw new ProxyError(401, 'authentication_error', 'Invalid API key');
+  }
+
+  if (apiKeyVerification.matched === 'previous') {
+    metrics.proxyApiKey.previousKeyMatches += 1;
+    log('proxy api key matched previous key during grace period', {
+      requestId,
+      expiresAt: apiKeyVerification.expiresAt,
+    }, 'warn');
   }
 
   return {
     requestId,
     anthropicVersion: anthropicVersion || config.defaultAnthropicVersion,
+    apiKeyMatched: apiKeyVerification.matched,
   };
 }
 
@@ -787,6 +954,21 @@ async function handleMessages(req, res) {
   const requestId = createRequestId();
   const abortController = new AbortController();
   let releaseExecutionSlot = null;
+  let cliStarted = false;
+  let streamCleanupDeferred = false;
+  const abortOnResponseClose = () => {
+    if (!res.writableEnded) {
+      abortController.abort(new Error('Client disconnected before response completed'));
+    }
+  };
+  res.on('close', abortOnResponseClose);
+  activeMessageControllers.add(abortController);
+  metrics.messages.total += 1;
+
+  function finishMessageController() {
+    res.off('close', abortOnResponseClose);
+    activeMessageControllers.delete(abortController);
+  }
 
   try {
     applyProxyAuth(req, requestId);
@@ -855,6 +1037,8 @@ async function handleMessages(req, res) {
         extraArgs: config.claudeExtraArgs,
         stopSequences,
         signal: abortController.signal,
+        timeoutMs: config.claudeRequestTimeoutMs,
+        idleTimeoutMs: config.claudeStreamIdleTimeoutMs,
         onText(delta) {
           streamedText += delta;
           writeSseEvent(res, 'content_block_delta', {
@@ -867,9 +1051,11 @@ async function handleMessages(req, res) {
           });
         },
         onDone(result) {
+          finishMessageController();
           if (res.destroyed) {
             releaseExecutionSlot?.();
             releaseExecutionSlot = null;
+            metrics.messages.aborted += 1;
             log('messages request aborted', {
               requestId,
               phase: 'stream',
@@ -904,6 +1090,8 @@ async function handleMessages(req, res) {
           res.end();
           releaseExecutionSlot?.();
           releaseExecutionSlot = null;
+          metrics.claudeCli.streamCompleted += 1;
+          metrics.messages.streamCompleted += 1;
           log('messages stream completed', {
             requestId,
             elapsed_ms: Date.now() - startedAt,
@@ -911,9 +1099,17 @@ async function handleMessages(req, res) {
           });
         },
         onError(error) {
+          finishMessageController();
           releaseExecutionSlot?.();
           releaseExecutionSlot = null;
+          if (error?.code === 'CLAUDE_CLI_TIMEOUT') {
+            metrics.claudeCli.timeout += 1;
+          } else {
+            metrics.claudeCli.failed += 1;
+          }
+          metrics.messages.failed += 1;
           if (res.destroyed) {
+            metrics.messages.aborted += 1;
             log('messages request aborted', {
               requestId,
               phase: 'stream',
@@ -934,10 +1130,15 @@ async function handleMessages(req, res) {
           log('messages stream failed', { requestId, error: error.message });
         },
       });
+      streamCleanupDeferred = true;
+      cliStarted = true;
+      metrics.claudeCli.streamStarted += 1;
 
       return;
     }
 
+    cliStarted = true;
+    metrics.claudeCli.jsonStarted += 1;
     const cliResult = await runClaudeJson({
       claudeBin: config.claudeBin,
       model: mappedModel,
@@ -945,7 +1146,9 @@ async function handleMessages(req, res) {
       prompt,
       extraArgs: config.claudeExtraArgs,
       signal: abortController.signal,
+      timeoutMs: config.claudeRequestTimeoutMs,
     });
+    metrics.claudeCli.jsonCompleted += 1;
 
     const truncated = truncateByStopSequences(cliResult.text, stopSequences);
     const responseBody = makeAnthropicMessageResponse({
@@ -962,6 +1165,7 @@ async function handleMessages(req, res) {
     });
     releaseExecutionSlot?.();
     releaseExecutionSlot = null;
+    metrics.messages.jsonCompleted += 1;
 
     log('messages request completed', {
       requestId,
@@ -972,16 +1176,42 @@ async function handleMessages(req, res) {
   } catch (error) {
     releaseExecutionSlot?.();
     releaseExecutionSlot = null;
+    if (cliStarted) {
+      if (error?.code === 'CLAUDE_CLI_TIMEOUT') {
+        metrics.claudeCli.timeout += 1;
+      } else if (error?.name || error?.message) {
+        metrics.claudeCli.failed += 1;
+      }
+    }
+    metrics.messages.failed += 1;
     if (!(error instanceof ProxyError) && res.destroyed) {
+      metrics.messages.aborted += 1;
       log('messages request aborted', { requestId, error: error.message }, 'warn');
       return;
     }
     sendProxyError(res, error, requestId);
     log('messages request failed', { requestId, error: error.message }, 'error');
+  } finally {
+    if (!streamCleanupDeferred) {
+      finishMessageController();
+    }
   }
 }
 
 function requestHandler(req, res) {
+  recordRequest(req, res);
+
+  if (isShuttingDown && req.url !== '/health') {
+    json(res, 503, {
+      ok: false,
+      error: 'Server is shutting down',
+    }, {
+      'cache-control': 'no-store',
+      connection: 'close',
+    });
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/') {
     const metadata = buildServiceMetadata();
 
@@ -1096,10 +1326,49 @@ function requestHandler(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/metrics') {
+    void (async () => {
+      try {
+        json(res, 200, await buildMetricsSnapshot(), {
+          'cache-control': 'no-store',
+        });
+      } catch (error) {
+        json(res, 500, {
+          ok: false,
+          error: error.message,
+        }, {
+          'cache-control': 'no-store',
+        });
+      }
+    })();
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
-    json(res, 200, {
-      ok: true,
+    json(res, 200, buildHealthStatus(), {
+      'cache-control': 'no-store',
     });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/ready') {
+    void (async () => {
+      try {
+        const status = await buildReadinessStatus();
+        json(res, status.ok ? 200 : 503, status, {
+          'cache-control': 'no-store',
+        });
+      } catch (error) {
+        json(res, 503, {
+          ok: false,
+          service: serviceMetadata.service,
+          stateBackend: config.stateBackend,
+          error: error.message,
+        }, {
+          'cache-control': 'no-store',
+        });
+      }
+    })();
     return;
   }
 
@@ -1118,8 +1387,12 @@ function requestHandler(req, res) {
 }
 
 const server = http.createServer(requestHandler);
+server.on('listening', () => {
+  isShuttingDown = false;
+});
 
 function startServer() {
+  isShuttingDown = false;
   log('server started', {
     host: config.host,
     port: config.port,
@@ -1131,8 +1404,88 @@ function startServer() {
   });
 }
 
+function closeServer() {
+  if (!server.listening) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+    server.closeIdleConnections?.();
+  });
+}
+
+async function shutdown(reason = 'manual', { exit = false } = {}) {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  isShuttingDown = true;
+  metrics.shutdowns.started += 1;
+  log('server shutdown started', {
+    reason,
+    activeMessages: activeMessageControllers.size,
+  }, 'warn');
+
+  const forceTimer = setTimeout(() => {
+    metrics.shutdowns.forced += 1;
+    log('server shutdown force timeout', {
+      reason,
+      activeMessages: activeMessageControllers.size,
+    }, 'error');
+    for (const controller of [...activeMessageControllers]) {
+      controller.abort(new Error(`Server shutdown force timeout: ${reason}`));
+    }
+    server.closeAllConnections?.();
+    if (exit) {
+      process.exit(1);
+    }
+  }, config.shutdownGraceMs);
+  forceTimer.unref?.();
+
+  shutdownPromise = (async () => {
+    for (const controller of [...activeMessageControllers]) {
+      controller.abort(new Error(`Server shutdown: ${reason}`));
+    }
+    messageConcurrencyManager.clearQueue();
+    await closeServer();
+    metrics.shutdowns.completed += 1;
+    log('server shutdown completed', { reason }, 'warn');
+    await recentLogStore.flush();
+    await stateBackend?.close();
+    clearTimeout(forceTimer);
+    if (exit) {
+      process.exit(0);
+    }
+  })().catch(async (error) => {
+    clearTimeout(forceTimer);
+    log('server shutdown failed', { reason, error: error.message }, 'error');
+    await recentLogStore.flush();
+    if (exit) {
+      process.exit(1);
+    }
+    throw error;
+  }).finally(() => {
+    shutdownPromise = null;
+  });
+
+  return shutdownPromise;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   startServer();
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM', { exit: true });
+  });
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT', { exit: true });
+  });
 }
 
 export {
@@ -1145,4 +1498,5 @@ export {
   server,
   requestHandler,
   startServer,
+  shutdown,
 };

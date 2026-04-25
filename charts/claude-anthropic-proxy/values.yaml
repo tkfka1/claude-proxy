@@ -20,6 +20,8 @@ podLabels: {}
 
 podSecurityContext: {}
 
+terminationGracePeriodSeconds: 30
+
 proxyState:
   mountPath: /home/node/.local/state/claude-anthropic-proxy
   fileName: runtime-state.json
@@ -34,7 +36,10 @@ proxyState:
     annotations: {}
 
 redis:
-  enabled: false
+  enabled: true
+  external:
+    existingSecret: ""
+    existingSecretKey: REDIS_URL
   image:
     repository: redis
     tag: "7.4-alpine"
@@ -74,7 +79,7 @@ livenessProbe:
     port: http
 readinessProbe:
   httpGet:
-    path: /health
+    path: /ready
     port: http
 
 autoscaling:
@@ -107,6 +112,9 @@ env:
   MAX_QUEUED_MESSAGE_REQUESTS: "16"
   MAX_MESSAGE_QUEUE_WAIT_MS: "30000"
   RECENT_LOG_LIMIT: "200"
+  CLAUDE_REQUEST_TIMEOUT_MS: "300000"
+  CLAUDE_STREAM_IDLE_TIMEOUT_MS: "60000"
+  SHUTDOWN_GRACE_MS: "10000"
   REDIS_KEY_PREFIX: "claude-anthropic-proxy"
   CLAUDE_BIN: claude
   CLAUDE_DEFAULT_MODEL: sonnet
@@ -115,6 +123,8 @@ env:
   ALLOW_MISSING_API_KEY_HEADER: "true"
   REQUIRE_ANTHROPIC_VERSION: "false"
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
+  PROXY_API_KEY_GRACE_PERIOD_SECONDS: "300"
+  PROXY_API_KEY_HISTORY_LIMIT: "5"
 
 proxyApiKey:
   value: ""

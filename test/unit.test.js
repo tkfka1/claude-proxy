@@ -29,6 +29,7 @@ import {
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
 import { createRedisStateStore } from '../src/redis-state-store.js';
+import { loadConfig } from '../src/config.js';
 
 class FakeRedisSemaphoreClient {
   constructor() {
@@ -218,6 +219,42 @@ test('validateWebPasswordSettings requires a docs password or hash', () => {
   );
 });
 
+test('loadConfig requires Redis unless local fallback is explicitly enabled', () => {
+  const names = [
+    'REDIS_URL',
+    'ALLOW_LOCAL_STATE_BACKEND',
+    'WEB_PASSWORD',
+    'WEB_PASSWORD_HASH',
+    'CLAUDE_MODEL_MAP_JSON',
+    'CLAUDE_EXTRA_ARGS_JSON',
+  ];
+  const snapshot = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+
+  try {
+    process.env.REDIS_URL = '';
+    process.env.ALLOW_LOCAL_STATE_BACKEND = '';
+    process.env.WEB_PASSWORD = 'docs-secret';
+    process.env.WEB_PASSWORD_HASH = '';
+    process.env.CLAUDE_MODEL_MAP_JSON = '';
+    process.env.CLAUDE_EXTRA_ARGS_JSON = '[]';
+
+    assert.throws(() => loadConfig(), /REDIS_URL is required/);
+
+    process.env.ALLOW_LOCAL_STATE_BACKEND = 'true';
+    const config = loadConfig();
+    assert.equal(config.redisUrl, '');
+    assert.equal(config.allowLocalStateBackend, true);
+  } finally {
+    for (const [name, value] of Object.entries(snapshot)) {
+      if (value == null) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+});
+
 test('proxy api key helpers validate, mask, and update runtime state', async () => {
   assert.throws(() => validateProxyApiKeyInput('short'), /at least 8 characters/);
   assert.equal(maskProxyApiKey('runtime-secret-key'), 'runt…ey');
@@ -227,15 +264,85 @@ test('proxy api key helpers validate, mask, and update runtime state', async () 
     configured: false,
     maskedApiKey: null,
     updatedAt: null,
+    gracePeriodSeconds: 300,
+    previousKeyCount: 0,
+    previousKeys: [],
+    history: [],
   });
 
   const updated = await manager.setApiKey('runtime-secret-key');
   assert.equal(updated.apiKey, 'runtime-secret-key');
   assert.equal(updated.configured, true);
   assert.equal(updated.maskedApiKey, 'runt…ey');
+  assert.deepEqual(manager.verifyApiKey('runtime-secret-key'), {
+    valid: true,
+    matched: 'current',
+    expiresAt: null,
+  });
+
+  const rotated = await manager.setApiKey('next-runtime-secret');
+  assert.equal(rotated.previousKeyCount, 1);
+  assert.equal(manager.verifyApiKey('runtime-secret-key').valid, true);
+  assert.equal(manager.verifyApiKey('runtime-secret-key').matched, 'previous');
+  assert.equal(rotated.history.length, 2);
 
   await manager.resetApiKey('');
   assert.equal(manager.getStatus().configured, false);
+});
+
+test('proxy api key manager can disable previous-key grace and trim history', async () => {
+  const manager = createProxyApiKeyManager({
+    gracePeriodSeconds: 0,
+    historyLimit: 1,
+  });
+
+  await manager.setApiKey('runtime-secret-key');
+  const rotated = await manager.setApiKey('next-runtime-secret');
+
+  assert.equal(rotated.previousKeyCount, 0);
+  assert.equal(rotated.history.length, 1);
+  assert.deepEqual(manager.verifyApiKey('runtime-secret-key'), {
+    valid: false,
+    matched: null,
+    expiresAt: null,
+  });
+});
+
+test('proxy api key manager applies current grace settings to persisted previous keys', () => {
+  const retiredAt = new Date(Date.now() - 5_000).toISOString();
+  const storedExpiresAt = new Date(Date.now() + 300_000).toISOString();
+  const loadedState = {
+    proxyApiKey: 'next-runtime-secret',
+    updatedAt: new Date().toISOString(),
+    previousApiKeys: [
+      {
+        apiKey: 'runtime-secret-key',
+        retiredAt,
+        expiresAt: storedExpiresAt,
+      },
+    ],
+    history: [],
+  };
+
+  const disabledGraceManager = createProxyApiKeyManager({
+    loadedState,
+    gracePeriodSeconds: 0,
+  });
+  assert.deepEqual(disabledGraceManager.verifyApiKey('runtime-secret-key'), {
+    valid: false,
+    matched: null,
+    expiresAt: null,
+  });
+
+  const shortenedGraceManager = createProxyApiKeyManager({
+    loadedState,
+    gracePeriodSeconds: 1,
+  });
+  assert.deepEqual(shortenedGraceManager.verifyApiKey('runtime-secret-key'), {
+    valid: false,
+    matched: null,
+    expiresAt: null,
+  });
 });
 
 test('proxy state file store saves and loads persisted x-api-key state', () => {
@@ -254,6 +361,8 @@ test('proxy state file store saves and loads persisted x-api-key state', () => {
   assert.deepEqual(store.loadState(), {
     proxyApiKey: 'persisted-secret-key',
     updatedAt: '2026-04-24T00:00:00.000Z',
+    previousApiKeys: [],
+    history: [],
   });
 
   store.clearState();
@@ -440,6 +549,8 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
   assert.deepEqual(await proxyStore.loadState(), {
     proxyApiKey: 'redis-state-key',
     updatedAt: '2026-04-24T00:00:00.000Z',
+    previousApiKeys: [],
+    history: [],
   });
 
   const logStore = store.createRecentLogStore();
