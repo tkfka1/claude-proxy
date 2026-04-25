@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import { parseScryptPasswordHash } from './web-auth.js';
 
 function sanitizeKeySegment(value) {
   return String(value || '')
@@ -81,6 +82,7 @@ function parseWebSession(raw) {
 
   return {
     expiresAt,
+    passwordUpdatedAt: payload.passwordUpdatedAt == null ? null : String(payload.passwordUpdatedAt),
   };
 }
 
@@ -94,6 +96,26 @@ function parseWebLoginAttempt(raw) {
     count: Number(payload.count || 0),
     windowStartedAt: Number(payload.windowStartedAt || 0),
     blockedUntil: Number(payload.blockedUntil || 0),
+  };
+}
+
+function parseWebPasswordState(raw) {
+  const payload = JSON.parse(raw);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Persisted Redis web password state must be a JSON object');
+  }
+
+  const passwordHash = String(payload.passwordHash || '').trim();
+  if (!passwordHash) {
+    return null;
+  }
+
+  parseScryptPasswordHash(passwordHash);
+
+  const updatedAt = payload.updatedAt == null ? null : String(payload.updatedAt).trim();
+  return {
+    passwordHash,
+    updatedAt: updatedAt || null,
   };
 }
 
@@ -202,6 +224,7 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
     createWebAuthStore() {
       const sessionPrefix = buildKey(keyPrefix, 'web-session');
       const loginAttemptPrefix = buildKey(keyPrefix, 'web-login-attempt');
+      const passwordKey = buildKey(keyPrefix, 'web-password');
 
       return {
         async getSession(token) {
@@ -212,8 +235,8 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
 
           return parseWebSession(raw);
         },
-        async createSession({ token, expiresAt, ttlMs }) {
-          await client.set(`${sessionPrefix}:${token}`, JSON.stringify({ expiresAt }), {
+        async createSession({ token, expiresAt, passwordUpdatedAt = null, ttlMs }) {
+          await client.set(`${sessionPrefix}:${token}`, JSON.stringify({ expiresAt, passwordUpdatedAt }), {
             PX: ttlMs,
           });
         },
@@ -235,6 +258,26 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
         },
         async clearLoginAttempt(key) {
           await client.del(`${loginAttemptPrefix}:${key}`);
+        },
+        async getPasswordState() {
+          const raw = await client.get(passwordKey);
+          if (!raw) {
+            return null;
+          }
+
+          return parseWebPasswordState(raw);
+        },
+        async setPasswordState(state) {
+          const normalized = parseWebPasswordState(JSON.stringify(state));
+          if (!normalized) {
+            await client.del(passwordKey);
+            return;
+          }
+
+          await client.set(passwordKey, JSON.stringify(normalized));
+        },
+        async clearPasswordState() {
+          await client.del(passwordKey);
         },
       };
     },

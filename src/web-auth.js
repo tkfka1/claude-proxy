@@ -88,6 +88,20 @@ export function validateWebPasswordSettings({ webPassword, webPasswordHash }) {
   }
 }
 
+export function validateNewWebPassword(password) {
+  const value = String(password || '');
+
+  if (value.length < 12) {
+    throw new Error('New password must be at least 12 characters.');
+  }
+
+  if (looksLikePlaceholderPassword(value)) {
+    throw new Error('New password must not be a placeholder.');
+  }
+
+  return value;
+}
+
 export function verifyWebPassword(password, { webPassword = '', webPasswordHash = '' } = {}) {
   if (webPasswordHash) {
     const { saltHex, digestHex } = parseScryptPasswordHash(webPasswordHash);

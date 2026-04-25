@@ -26,13 +26,14 @@ import { createRedisMessageConcurrencyManager } from './redis-message-concurrenc
 import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
-import { verifyWebPassword } from './web-auth.js';
+import { createScryptPasswordHash, validateNewWebPassword, verifyWebPassword } from './web-auth.js';
 import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
 
 const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
+let memoryWebPasswordState = null;
 const startedAt = Date.now();
 let isShuttingDown = false;
 let shutdownPromise = null;
@@ -96,8 +97,8 @@ const webAuthStateStore = stateBackend
 
         return { ...session };
       },
-      async createSession({ token, expiresAt }) {
-        webSessions.set(token, { expiresAt });
+      async createSession({ token, expiresAt, passwordUpdatedAt }) {
+        webSessions.set(token, { expiresAt, passwordUpdatedAt });
       },
       async deleteSession(token) {
         webSessions.delete(token);
@@ -119,7 +120,17 @@ const webAuthStateStore = stateBackend
       async clearLoginAttempt(key) {
         webLoginAttempts.delete(key);
       },
+      async getPasswordState() {
+        return memoryWebPasswordState ? { ...memoryWebPasswordState } : null;
+      },
+      async setPasswordState(state) {
+        memoryWebPasswordState = state ? { ...state } : null;
+      },
+      async clearPasswordState() {
+        memoryWebPasswordState = null;
+      },
     };
+let activeWebPasswordState = await webAuthStateStore.getPasswordState();
 const proxyStateFileStore = stateBackend ? stateBackend.createProxyApiKeyStore() : createProxyStateFileStore({ filePath: config.proxyStateFile });
 const recentLogFileStore = stateBackend ? stateBackend.createRecentLogStore() : createRecentLogFileStore({ filePath: config.recentLogFile });
 const initialRecentLogEntries = await recentLogFileStore.loadEntries();
@@ -179,6 +190,44 @@ const messageConcurrencyManager = stateBackend
     });
 config.proxyApiKey = proxyApiKeyManager.getApiKey();
 config.stateBackend = stateBackend ? 'redis' : 'file';
+
+function getWebPasswordSettings() {
+  if (activeWebPasswordState?.passwordHash) {
+    return {
+      webPassword: '',
+      webPasswordHash: activeWebPasswordState.passwordHash,
+    };
+  }
+
+  return {
+    webPassword: config.webPassword,
+    webPasswordHash: config.webPasswordHash,
+  };
+}
+
+function getWebPasswordVersion() {
+  return activeWebPasswordState?.updatedAt || 'config';
+}
+
+function webSessionMatchesCurrentPassword(session) {
+  if (!activeWebPasswordState?.passwordHash) {
+    return true;
+  }
+
+  return session?.passwordUpdatedAt === getWebPasswordVersion();
+}
+
+function buildWebPasswordStatus() {
+  return {
+    configured: isWebLoginEnabled(),
+    source: activeWebPasswordState?.passwordHash
+      ? 'runtime'
+      : config.webPasswordHash
+        ? 'env-hash'
+        : 'env-plain',
+    updatedAt: activeWebPasswordState?.updatedAt || null,
+  };
+}
 
 function log(event, details = {}, level = 'info') {
   recentLogStore.add(level, event, details);
@@ -252,7 +301,8 @@ function recordRequest(req, res) {
 }
 
 function isWebLoginEnabled() {
-  return Boolean(config.webPassword || config.webPasswordHash);
+  const settings = getWebPasswordSettings();
+  return Boolean(settings.webPassword || settings.webPasswordHash);
 }
 
 function buildProxyApiKeySettings() {
@@ -270,6 +320,10 @@ function buildServiceMetadata() {
     web_login_enabled: isWebLoginEnabled(),
     proxy_api_key_configured: buildProxyApiKeySettings().configured,
     logs_path: '/logs/recent',
+    web_password_paths: {
+      status: '/web-password',
+      update: '/web-password',
+    },
     state_backend: config.stateBackend,
     log_store: recentLogStore.getPublicStatus(),
     message_execution: messageConcurrencyManager.getStatus(),
@@ -502,6 +556,10 @@ async function getWebSession(req) {
 
   const session = await webAuthStateStore.getSession(token);
   if (!session) return null;
+  if (!webSessionMatchesCurrentPassword(session)) {
+    await webAuthStateStore.deleteSession(token);
+    return null;
+  }
 
   return {
     token,
@@ -517,6 +575,7 @@ async function createWebSession() {
   await webAuthStateStore.createSession({
     token,
     expiresAt,
+    passwordUpdatedAt: getWebPasswordVersion(),
     ttlMs: maxAgeSeconds * 1000,
   });
 
@@ -692,7 +751,7 @@ async function handleWebLogin(req, res) {
     const form = await readFormBody(req);
     const password = String(form.get('password') ?? '');
 
-    if (!verifyWebPassword(password, config)) {
+    if (!verifyWebPassword(password, getWebPasswordSettings())) {
       const failedAttempt = await registerFailedWebLogin(req);
       const waitSeconds = describeWebLoginBlockSeconds(failedAttempt);
       log('docs login failed', { client: getWebLoginKey(req), waitSeconds }, 'warn');
@@ -760,6 +819,73 @@ async function handleWebLogout(req, res) {
   } catch (error) {
     log('docs logout failed', { error: error.message }, 'error');
     renderDocsStateUnavailable(res, '로그아웃 중 세션 저장소를 읽지 못했습니다. 잠시 후 다시 시도하세요.');
+  }
+}
+
+async function handleWebPasswordStatus(req, res) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    status: buildWebPasswordStatus(),
+  }, {
+    'cache-control': 'no-store',
+  });
+}
+
+async function handleWebPasswordUpdate(req, res) {
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+    return;
+  }
+
+  try {
+    const session = await getWebSession(req);
+    const body = await readJsonBody(req, 16 * 1024);
+    const currentPassword = String(body?.currentPassword || '');
+    const newPassword = validateNewWebPassword(body?.newPassword);
+    const currentSettings = getWebPasswordSettings();
+
+    if (!verifyWebPassword(currentPassword, currentSettings)) {
+      log('docs password change rejected', { client: getWebLoginKey(req), reason: 'current-password' }, 'warn');
+      jsonError(res, 401, 'Current password is incorrect.');
+      return;
+    }
+
+    if (verifyWebPassword(newPassword, currentSettings)) {
+      jsonError(res, 400, 'New password must be different.');
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    const nextState = {
+      passwordHash: createScryptPasswordHash(newPassword),
+      updatedAt,
+    };
+    await webAuthStateStore.setPasswordState(nextState);
+    activeWebPasswordState = nextState;
+
+    if (session) {
+      await webAuthStateStore.deleteSession(session.token);
+    }
+
+    json(res, 200, {
+      ok: true,
+      status: buildWebPasswordStatus(),
+      reauthRequired: true,
+    }, {
+      'cache-control': 'no-store',
+      'set-cookie': serializeCookie(WEB_SESSION_COOKIE_NAME, '', {
+        maxAgeSeconds: 0,
+        expires: new Date(0),
+        secure: requestIsSecure(req),
+      }),
+    });
+    log('docs password changed', { client: getWebLoginKey(req), updatedAt }, 'warn');
+  } catch (error) {
+    log('docs password change failed', { client: getWebLoginKey(req), error: error.message }, 'error');
+    jsonError(res, error.statusCode || 400, error.message || 'Failed to update web password.');
   }
 }
 
@@ -1351,6 +1477,16 @@ function requestHandler(req, res) {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/web-password') {
+    void handleWebPasswordStatus(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/web-password') {
+    void handleWebPasswordUpdate(req, res);
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/api-info') {
     json(res, 200, buildServiceMetadata());
     return;
@@ -1548,6 +1684,13 @@ async function shutdown(reason = 'manual', { exit = false } = {}) {
   return shutdownPromise;
 }
 
+async function resetWebPasswordForTests() {
+  activeWebPasswordState = null;
+  webSessions.clear();
+  webLoginAttempts.clear();
+  await webAuthStateStore.clearPasswordState?.();
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   startServer();
   process.once('SIGTERM', () => {
@@ -1569,4 +1712,5 @@ export {
   requestHandler,
   startServer,
   shutdown,
+  resetWebPasswordForTests,
 };

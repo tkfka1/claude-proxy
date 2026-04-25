@@ -143,7 +143,7 @@ http://localhost:8080/docs
 실제 API 경로는 그대로 유지되고, 서버는 시작 전에 `WEB_PASSWORD` 또는
 `WEB_PASSWORD_HASH` 가 반드시 필요합니다. 로그인 후에는 문서 화면에서
 Claude CLI 로그인 상태를 확인하고, 웹에서 `claude auth login` / `logout` 을 실행하고,
-런타임 `x-api-key` 값도 바로 바꿀 수 있습니다.
+콘솔 비밀번호와 런타임 `x-api-key` 값도 바로 바꿀 수 있습니다.
 
 JSON 메타 정보가 필요하면:
 
@@ -214,6 +214,7 @@ curl -N http://localhost:8080/v1/messages \
 - `WEB_SESSION_TTL_HOURS`: 로그인 세션 유지 시간(시간 단위, 기본값 `12`)
 - `WEB_LOGIN_MAX_ATTEMPTS`: 같은 클라이언트 IP 기준 로그인 최대 실패 횟수(기본값 `5`, `0`이면 비활성화)
 - `WEB_LOGIN_WINDOW_MINUTES`: 로그인 실패 제한 윈도우/차단 시간(분 단위, 기본값 `15`)
+- 로그인 후 `Console password` 패널에서 비밀번호를 변경할 수 있습니다. 새 값은 scrypt hash로 Redis에 저장되고 현재 세션은 즉시 만료됩니다.
 
 예:
 

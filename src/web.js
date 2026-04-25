@@ -731,7 +731,7 @@ export function renderHomePage(config) {
         </article>
         <article class="stat-card">
           <span>Console auth</span>
-          <strong>${config.webPasswordHash ? 'hashed password' : 'password'}</strong>
+          <strong id="web-password-note">${config.webPasswordHash ? 'hashed password' : 'password'}</strong>
         </article>
       </div>
 
@@ -748,6 +748,35 @@ export function renderHomePage(config) {
           <li><div><span class="method">POST</span> <span class="endpoint-path">/v1/messages</span></div><div class="muted">Messages API</div></li>
           <li><div><span class="method">GET</span> <span class="endpoint-path">/logs/recent</span></div><div class="muted">recent events</div></li>
         </ul>
+      </section>
+
+      <section class="split">
+        <article class="panel">
+          <h2>Console password</h2>
+          <p class="muted">변경하면 현재 세션을 종료하고 다시 로그인합니다.</p>
+          <div class="banner" style="margin-bottom: 16px;">
+            <div id="web-password-summary"><strong>상태 확인 중...</strong></div>
+            <div id="web-password-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Change password</h2>
+          <form id="web-password-form">
+            <label>
+              현재 비밀번호
+              <input id="web-password-current" type="password" autocomplete="current-password" required />
+            </label>
+            <label>
+              새 비밀번호
+              <input id="web-password-next" type="password" autocomplete="new-password" minlength="12" placeholder="12자 이상" required />
+            </label>
+            <label>
+              새 비밀번호 확인
+              <input id="web-password-confirm" type="password" autocomplete="new-password" minlength="12" required />
+            </label>
+            <button id="web-password-submit" type="submit">비밀번호 변경</button>
+          </form>
+        </article>
       </section>
 
       <section class="split">
@@ -873,6 +902,14 @@ export function renderHomePage(config) {
         const proxyApiKeyDetail = document.getElementById('proxy-api-key-detail');
         const proxyApiKeyPreview = document.getElementById('proxy-api-key-preview');
         const proxyApiKeyNote = document.getElementById('proxy-api-key-note');
+        const webPasswordNote = document.getElementById('web-password-note');
+        const webPasswordSummary = document.getElementById('web-password-summary');
+        const webPasswordDetail = document.getElementById('web-password-detail');
+        const webPasswordForm = document.getElementById('web-password-form');
+        const webPasswordCurrent = document.getElementById('web-password-current');
+        const webPasswordNext = document.getElementById('web-password-next');
+        const webPasswordConfirm = document.getElementById('web-password-confirm');
+        const webPasswordSubmit = document.getElementById('web-password-submit');
         const proxyApiKeyForm = document.getElementById('proxy-api-key-form');
         const proxyApiKeyInput = document.getElementById('proxy-api-key-input');
         const proxyApiKeySubmit = document.getElementById('proxy-api-key-submit');
@@ -912,6 +949,45 @@ export function renderHomePage(config) {
             throw new Error(payload.error || ('Request failed: ' + response.status));
           }
           return payload;
+        }
+
+        function renderWebPasswordStatus(status) {
+          const configured = Boolean(status && status.configured);
+          const source = String(status && status.source || '');
+          const sourceLabel = source === 'runtime'
+            ? 'runtime'
+            : source === 'env-hash'
+              ? 'env hash'
+              : 'env password';
+          webPasswordSummary.innerHTML = configured
+            ? '<strong>Console password: 설정됨</strong>'
+            : '<strong>Console password: 아직 없음</strong>';
+          webPasswordDetail.textContent = configured
+            ? [
+                sourceLabel,
+                status.updatedAt ? new Date(status.updatedAt).toLocaleString() : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : 'WEB_PASSWORD 또는 WEB_PASSWORD_HASH가 필요합니다.';
+          webPasswordNote.textContent = sourceLabel;
+        }
+
+        function syncWebPasswordButtons(disabled) {
+          webPasswordCurrent.disabled = disabled;
+          webPasswordNext.disabled = disabled;
+          webPasswordConfirm.disabled = disabled;
+          webPasswordSubmit.disabled = disabled;
+        }
+
+        async function refreshWebPasswordStatus() {
+          try {
+            const payload = await fetchJson('/web-password');
+            renderWebPasswordStatus(payload.status);
+          } catch (error) {
+            webPasswordSummary.innerHTML = '<strong>Console password 상태 확인 실패</strong>';
+            webPasswordDetail.textContent = error.message;
+          }
         }
 
         function buildMessageExample(stream) {
@@ -1160,6 +1236,41 @@ export function renderHomePage(config) {
           }
         });
 
+        webPasswordForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const nextPassword = webPasswordNext.value;
+          if (nextPassword !== webPasswordConfirm.value) {
+            webPasswordDetail.textContent = '새 비밀번호가 서로 다릅니다.';
+            return;
+          }
+
+          syncWebPasswordButtons(true);
+          try {
+            const payload = await fetchJson('/web-password', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                currentPassword: webPasswordCurrent.value,
+                newPassword: nextPassword,
+              }),
+            });
+            webPasswordCurrent.value = '';
+            webPasswordNext.value = '';
+            webPasswordConfirm.value = '';
+            renderWebPasswordStatus(payload.status);
+            webPasswordDetail.textContent = '변경 완료. 다시 로그인합니다.';
+            setTimeout(() => {
+              window.location.href = '/login';
+            }, 800);
+          } catch (error) {
+            webPasswordDetail.textContent = error.message;
+          } finally {
+            syncWebPasswordButtons(false);
+          }
+        });
+
         recentLogRefresh.addEventListener('click', () => {
           void refreshRecentLogs();
         });
@@ -1377,6 +1488,7 @@ export function renderHomePage(config) {
         });
 
         refreshProxyApiKeyState();
+        refreshWebPasswordStatus();
         refreshRecentLogs();
         refreshClaudeAuthStatus();
         refreshClaudeAuthOperation();

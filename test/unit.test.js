@@ -13,6 +13,7 @@ import {
   validateWebPasswordSettings,
   createScryptPasswordHash,
   parseScryptPasswordHash,
+  validateNewWebPassword,
   verifyWebPassword,
 } from '../src/web-auth.js';
 import {
@@ -217,6 +218,15 @@ test('validateWebPasswordSettings requires a docs password or hash', () => {
     () => validateWebPasswordSettings({ webPassword: 'replace-with-strong-docs-password', webPasswordHash: '' }),
     /must be replaced with a real secret/,
   );
+});
+
+test('validateNewWebPassword rejects weak or placeholder runtime passwords', () => {
+  assert.throws(() => validateNewWebPassword('too-short'), /at least 12 characters/);
+  assert.throws(
+    () => validateNewWebPassword('replace-with-strong-docs-password'),
+    /must not be a placeholder/,
+  );
+  assert.equal(validateNewWebPassword('new-docs-secret-123'), 'new-docs-secret-123');
 });
 
 test('loadConfig requires Redis unless local fallback is explicitly enabled', () => {
@@ -561,15 +571,27 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
   await webAuthStore.createSession({
     token: 'session-token',
     expiresAt: Date.now() + 60_000,
+    passwordUpdatedAt: '2026-04-25T00:00:00.000Z',
     ttlMs: 60_000,
   });
-  assert.equal(Boolean(await webAuthStore.getSession('session-token')), true);
+  assert.equal((await webAuthStore.getSession('session-token')).passwordUpdatedAt, '2026-04-25T00:00:00.000Z');
   await webAuthStore.setLoginAttempt('client-key', {
     count: 2,
     windowStartedAt: 1,
     blockedUntil: 2,
   }, 60_000);
   assert.equal((await webAuthStore.getLoginAttempt('client-key')).count, 2);
+  const passwordHash = createScryptPasswordHash('redis-docs-secret-123', '00112233445566778899aabbccddeeff');
+  await webAuthStore.setPasswordState({
+    passwordHash,
+    updatedAt: '2026-04-25T00:00:00.000Z',
+  });
+  assert.deepEqual(await webAuthStore.getPasswordState(), {
+    passwordHash,
+    updatedAt: '2026-04-25T00:00:00.000Z',
+  });
+  await webAuthStore.clearPasswordState();
+  assert.equal(await webAuthStore.getPasswordState(), null);
 
   await store.close();
 });

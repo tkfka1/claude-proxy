@@ -30,6 +30,7 @@ const {
   messageConcurrencyManager,
   proxyApiKeyManager,
   recentLogStore,
+  resetWebPasswordForTests,
   server,
   shutdown,
 } = await import('../src/server.js');
@@ -54,14 +55,14 @@ async function startServer() {
   return `http://${address.address}:${address.port}`;
 }
 
-async function loginDocs(baseUrl) {
+async function loginDocs(baseUrl, password = 'docs-secret') {
   const loginResponse = await fetch(`${baseUrl}/login`, {
     method: 'POST',
     redirect: 'manual',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams({ password: 'docs-secret' }),
+    body: new URLSearchParams({ password }),
   });
 
   assert.equal(loginResponse.status, 303);
@@ -113,6 +114,7 @@ test.beforeEach(async () => {
   config.claudeRequestTimeoutMs = 300_000;
   config.claudeStreamIdleTimeoutMs = 60_000;
   await proxyApiKeyManager.resetApiKey('');
+  await resetWebPasswordForTests();
   config.allowMissingApiKeyHeader = true;
   messageConcurrencyManager.clearQueue();
   messageConcurrencyManager.configure({
@@ -412,6 +414,16 @@ test('GET /proxy-api-key requires docs authentication', async () => {
   assert.equal(body.ok, false);
 });
 
+test('GET /web-password requires docs authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/web-password`);
+
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+});
+
 test('GET /logs/recent requires docs authentication', async () => {
   const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
 
@@ -420,6 +432,95 @@ test('GET /logs/recent requires docs authentication', async () => {
   assert.equal(response.status, 401);
   const body = await response.json();
   assert.equal(body.ok, false);
+});
+
+test('POST /web-password changes docs password and invalidates the current session', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+
+  const statusResponse = await fetch(`${baseUrl}/web-password`, {
+    headers: {
+      cookie,
+    },
+  });
+  assert.equal(statusResponse.status, 200);
+  const statusBody = await statusResponse.json();
+  assert.equal(statusBody.ok, true);
+  assert.equal(statusBody.status.configured, true);
+  assert.equal(statusBody.status.source, 'env-plain');
+
+  const wrongCurrentResponse = await fetch(`${baseUrl}/web-password`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      currentPassword: 'wrong-password',
+      newPassword: 'docs-secret-updated-123',
+    }),
+  });
+  assert.equal(wrongCurrentResponse.status, 401);
+
+  const shortPasswordResponse = await fetch(`${baseUrl}/web-password`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      currentPassword: 'docs-secret',
+      newPassword: 'too-short',
+    }),
+  });
+  assert.equal(shortPasswordResponse.status, 400);
+
+  const updateResponse = await fetch(`${baseUrl}/web-password`, {
+    method: 'POST',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      currentPassword: 'docs-secret',
+      newPassword: 'docs-secret-updated-123',
+    }),
+  });
+
+  assert.equal(updateResponse.status, 200);
+  const updateBody = await updateResponse.json();
+  assert.equal(updateBody.ok, true);
+  assert.equal(updateBody.reauthRequired, true);
+  assert.equal(updateBody.status.source, 'runtime');
+  assert.equal(typeof updateBody.status.updatedAt, 'string');
+  assert.match(updateResponse.headers.get('set-cookie') || '', /Max-Age=0/);
+
+  const oldSessionResponse = await fetch(`${baseUrl}/web-password`, {
+    headers: {
+      cookie,
+    },
+  });
+  assert.equal(oldSessionResponse.status, 401);
+
+  const oldPasswordResponse = await fetch(`${baseUrl}/login`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ password: 'docs-secret' }),
+  });
+  assert.equal(oldPasswordResponse.status, 401);
+
+  const newCookie = await loginDocs(baseUrl, 'docs-secret-updated-123');
+  const newStatusResponse = await fetch(`${baseUrl}/web-password`, {
+    headers: {
+      cookie: newCookie,
+    },
+  });
+  assert.equal(newStatusResponse.status, 200);
+  const newStatusBody = await newStatusResponse.json();
+  assert.equal(newStatusBody.status.source, 'runtime');
 });
 
 test('POST /proxy-api-key updates the runtime x-api-key after docs login', async () => {

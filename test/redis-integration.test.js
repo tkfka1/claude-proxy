@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRedisStateStore } from '../src/redis-state-store.js';
+import { createScryptPasswordHash } from '../src/web-auth.js';
 
 const redisUrl = process.env.REDIS_INTEGRATION_URL || '';
 
@@ -62,10 +63,12 @@ test('real Redis backend stores proxy state, recent logs, web auth, and readines
     await webAuth.createSession({
       token: 'session-token',
       expiresAt: Date.now() + 60_000,
+      passwordUpdatedAt: '2026-04-25T00:00:00.000Z',
       ttlMs: 60_000,
     });
     const session = await webAuth.getSession('session-token');
     assert.equal(Number.isFinite(session.expiresAt), true);
+    assert.equal(session.passwordUpdatedAt, '2026-04-25T00:00:00.000Z');
 
     await webAuth.setLoginAttempt('client', {
       count: 2,
@@ -77,6 +80,18 @@ test('real Redis backend stores proxy state, recent logs, web auth, and readines
       windowStartedAt: 100,
       blockedUntil: 200,
     });
+
+    const passwordHash = createScryptPasswordHash('redis-docs-secret-123', '00112233445566778899aabbccddeeff');
+    await webAuth.setPasswordState({
+      passwordHash,
+      updatedAt: '2026-04-25T00:00:00.000Z',
+    });
+    assert.deepEqual(await webAuth.getPasswordState(), {
+      passwordHash,
+      updatedAt: '2026-04-25T00:00:00.000Z',
+    });
+    await webAuth.clearPasswordState();
+    assert.equal(await webAuth.getPasswordState(), null);
   } finally {
     await cleanupKeys(store.client, keyPrefix);
     await store.close();
