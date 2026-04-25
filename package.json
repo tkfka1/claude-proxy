@@ -1,6 +1,6 @@
 {
   "name": "claude-anthropic-proxy",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Anthropic Messages API-compatible proxy backed by claude-cli",
   "type": "module",
   "main": "src/server.js",
