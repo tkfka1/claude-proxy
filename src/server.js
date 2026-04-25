@@ -27,7 +27,7 @@ import { createRedisStateStore } from './redis-state-store.js';
 import { createRecentLogStore } from './recent-log-store.js';
 import { runClaudeJson, runClaudeStream } from './claude-cli.js';
 import { createScryptPasswordHash, validateNewWebPassword, verifyWebPassword } from './web-auth.js';
-import { renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
+import { faviconSvg, renderHomePage, renderLoginPage, serviceMetadata } from './web.js';
 
 const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
@@ -256,7 +256,7 @@ function shouldAddAccessLog(req) {
 
   // These endpoints are usually hit by probes or by the log panel itself.
   // Keeping them out prevents the UI from becoming a self-refresh log storm.
-  return !['/health', '/ready', '/metrics', '/logs/recent'].includes(pathname);
+  return !['/health', '/ready', '/metrics', '/logs/recent', '/favicon.svg', '/favicon.ico'].includes(pathname);
 }
 
 function accessLogLevel(statusCode) {
@@ -504,6 +504,17 @@ function html(res, status, body, extraHeaders = {}) {
   res.writeHead(status, {
     'content-type': 'text/html; charset=utf-8',
     'content-length': payload.length,
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
+function svg(res, status, body, extraHeaders = {}) {
+  const payload = Buffer.from(body, 'utf8');
+  res.writeHead(status, {
+    'content-type': 'image/svg+xml; charset=utf-8',
+    'content-length': payload.length,
+    'cache-control': 'public, max-age=86400',
     ...extraHeaders,
   });
   res.end(payload);
@@ -1409,6 +1420,11 @@ async function handleMessages(req, res) {
 
 function requestHandler(req, res) {
   recordRequest(req, res);
+
+  if (req.method === 'GET' && (req.url === '/favicon.svg' || req.url === '/favicon.ico')) {
+    svg(res, 200, faviconSvg);
+    return;
+  }
 
   if (isShuttingDown && req.url !== '/health') {
     json(res, 503, {

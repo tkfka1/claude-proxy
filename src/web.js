@@ -5,6 +5,15 @@ export const serviceMetadata = {
   docs_path: '/docs',
 };
 
+export const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="18" fill="#070806"/>
+  <circle cx="49" cy="14" r="24" fill="#c8f56d" opacity=".18"/>
+  <rect x="9" y="9" width="46" height="46" rx="14" fill="#0d120e" stroke="#c8f56d" stroke-width="3"/>
+  <text x="32" y="40" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="900" letter-spacing="-1.5" fill="#f6f1e7">CP</text>
+  <path d="M17 48h30" stroke="#c8f56d" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+</svg>
+`;
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -24,6 +33,9 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070806" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="shortcut icon" href="/favicon.ico" />
     <title>${escapeHtml(title)}</title>
     <style>
       :root {

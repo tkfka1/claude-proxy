@@ -188,6 +188,33 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.doesNotMatch(body, /WEB_PASSWORD/);
   assert.doesNotMatch(body, /WEB_PASSWORD_HASH/);
   assert.doesNotMatch(body, /들어가면 보이는 것/);
+  assert.match(body, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml" \/>/);
+  assert.match(body, /<link rel="shortcut icon" href="\/favicon\.ico" \/>/);
+});
+
+test('GET /favicon serves the Claude Proxy icon without polluting recent logs', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+
+  const svgResponse = await fetch(`${baseUrl}/favicon.svg`);
+  assert.equal(svgResponse.status, 200);
+  assert.match(svgResponse.headers.get('content-type') || '', /^image\/svg\+xml\b/);
+  assert.match(svgResponse.headers.get('cache-control') || '', /max-age=86400/);
+  const svgBody = await svgResponse.text();
+  assert.match(svgBody, /Claude|CP|<svg/);
+
+  const icoResponse = await fetch(`${baseUrl}/favicon.ico`);
+  assert.equal(icoResponse.status, 200);
+  assert.match(icoResponse.headers.get('content-type') || '', /^image\/svg\+xml\b/);
+
+  const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const logsBody = await logsResponse.json();
+  assert.equal(logsBody.entries.some((entry) => entry.details?.path === '/favicon.svg'), false);
+  assert.equal(logsBody.entries.some((entry) => entry.details?.path === '/favicon.ico'), false);
 });
 
 test('POST /login creates a session and grants access to the docs page', async () => {
