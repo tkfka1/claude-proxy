@@ -1,0 +1,20 @@
+{{- if and .Values.redis.enabled .Values.redis.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "claude-anthropic-proxy.redisFullname" . }}
+  labels:
+    {{- include "claude-anthropic-proxy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  selector:
+    matchLabels:
+      {{- include "claude-anthropic-proxy.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  {{- if .Values.redis.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.redis.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.redis.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.redis.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+{{- end }}

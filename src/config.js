@@ -51,6 +51,10 @@ export function loadConfig() {
   const shutdownGraceMs = parseIntegerEnv('SHUTDOWN_GRACE_MS', 10_000);
   const proxyApiKeyGracePeriodSeconds = parseIntegerEnv('PROXY_API_KEY_GRACE_PERIOD_SECONDS', 300);
   const proxyApiKeyHistoryLimit = parseIntegerEnv('PROXY_API_KEY_HISTORY_LIMIT', 5);
+  const securityHeadersEnabled = parseBooleanEnv('SECURITY_HEADERS_ENABLED', true);
+  const hstsEnabled = parseBooleanEnv('HSTS_ENABLED', true);
+  const hstsMaxAgeSeconds = parseIntegerEnv('HSTS_MAX_AGE_SECONDS', 31_536_000);
+  const hstsIncludeSubDomains = parseBooleanEnv('HSTS_INCLUDE_SUBDOMAINS', false);
 
   if (!Array.isArray(extraArgs)) {
     throw new Error('CLAUDE_EXTRA_ARGS_JSON must be a JSON array');
@@ -104,6 +108,10 @@ export function loadConfig() {
     throw new Error('PROXY_API_KEY_HISTORY_LIMIT must be 0 or greater');
   }
 
+  if (hstsMaxAgeSeconds < 0) {
+    throw new Error('HSTS_MAX_AGE_SECONDS must be 0 or greater');
+  }
+
   if (!redisUrl && !allowLocalStateBackend) {
     throw new Error('REDIS_URL is required. Start Redis and set REDIS_URL, or set ALLOW_LOCAL_STATE_BACKEND=true only for isolated tests.');
   }
@@ -146,6 +154,10 @@ export function loadConfig() {
     shutdownGraceMs,
     proxyApiKeyGracePeriodSeconds,
     proxyApiKeyHistoryLimit,
+    securityHeadersEnabled,
+    hstsEnabled,
+    hstsMaxAgeSeconds,
+    hstsIncludeSubDomains,
     webPassword: process.env.WEB_PASSWORD || '',
     webPasswordHash: process.env.WEB_PASSWORD_HASH || '',
     webSessionTtlHours,

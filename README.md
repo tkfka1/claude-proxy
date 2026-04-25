@@ -206,6 +206,10 @@ curl -N http://localhost:8080/v1/messages \
 - `REDIS_URL`: Redis backend 주소. **운영 실행에 필수**이며 x-api-key state / recent logs / 웹 로그인 세션 / 로그인 시도 제한 / 메시지 동시성 상태를 Redis에 저장합니다. docker compose는 `redis://redis:6379/0`, 로컬 직접 실행은 예를 들어 `redis://localhost:6379/0` 를 사용합니다. Redis가 없으면 서버는 시작하지 않습니다.
 - `REDIS_KEY_PREFIX`: Redis key prefix (기본값 `claude-anthropic-proxy`)
 - `PROXY_STATE_FILE`, `RECENT_LOG_FILE`: Redis를 쓰지 않는 격리 테스트/local fallback에서만 쓰는 파일 경로입니다. 운영 기본 경로에서는 Redis가 우선합니다.
+- `SECURITY_HEADERS_ENABLED`: 브라우저 보안 헤더(CSP, frame deny, nosniff 등) 전송 여부(기본값 `true`)
+- `HSTS_ENABLED`: HTTPS 또는 `X-Forwarded-Proto: https` 요청에 HSTS를 전송할지 여부(기본값 `true`)
+- `HSTS_MAX_AGE_SECONDS`: HSTS max-age 초 단위(기본값 `31536000`)
+- `HSTS_INCLUDE_SUBDOMAINS`: HSTS에 `includeSubDomains` 를 붙일지 여부(기본값 `false`)
 
 ### 웹 문서 로그인 설정
 
@@ -305,6 +309,7 @@ kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
 - `GET /health`: 프로세스 liveness용. Redis client 상태 요약을 포함하지만, Kubernetes livenessProbe처럼 프로세스 생존 확인에 사용합니다.
 - `GET /ready`: Redis `PING`, log store 상태, message concurrency 상태를 확인합니다. Redis가 준비되지 않으면 `503` 을 반환하므로 Kubernetes readinessProbe에 사용합니다.
 - `GET /metrics`: uptime, request status, message 성공/실패/abort, Claude CLI timeout, x-api-key rotation/grace match, Redis/log/concurrency 상태를 JSON으로 확인합니다.
+- 모든 응답에는 기본 브라우저 보안 헤더가 붙습니다. HSTS는 앞단 LB가 HTTPS를 종료하고 `X-Forwarded-Proto: https` 를 전달할 때만 켜집니다.
 
 ### Claude CLI 웹 로그인
 
@@ -754,6 +759,7 @@ deploy/k8s/
 기본 `values-prod.yaml` 은 내부 Redis를 같이 올립니다.
 `/v1/messages` 동시성/큐, `/docs` 에서 저장한 x-api-key, 최근 로그, 문서 로그인 세션/시도 제한, Claude auth runtime state는 Redis에 유지됩니다.
 Kubernetes readinessProbe는 `/ready`, livenessProbe는 `/health` 를 사용하고, Pod 종료 시 `terminationGracePeriodSeconds` 안에서 SIGTERM graceful shutdown을 수행합니다.
+운영 values는 앱/Redis PDB, preferred anti-affinity, topology spread constraint, ServiceAccount token automount off를 기본으로 켭니다.
 처음부터 `PROXY_API_KEY` 를 Secret으로 넣고 싶을 때만 `deploy/k8s/create-proxy-env-secret.sh` 를 추가로 사용합니다.
 외부 Redis를 쓰려면 `EXTERNAL_REDIS_URL=redis://... ./deploy/k8s/deploy-helm.sh` 또는 Helm `--set redis.enabled=false --set env.REDIS_URL=...` 를 사용합니다.
 

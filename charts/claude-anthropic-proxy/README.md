@@ -130,6 +130,7 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-cert-man
 
 앞단 Load Balancer가 `http://claude-proxy.idc.hkyo.kr/` 를 ingress controller로 전달하는 구성입니다.
 TLS/cert-manager는 켜지지 않고, service는 기존 `ClusterIP` 그대로 둡니다.
+앱의 HSTS 헤더는 HTTPS 요청 또는 `X-Forwarded-Proto: https` 가 들어온 요청에만 전송됩니다.
 
 ```bash
 EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http.yaml \
@@ -147,7 +148,8 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - `claudeAuth.redisSync.enabled=true` 이면 Claude auth runtime files도 Redis에 저장되어 여러 프록시 Pod가 같은 인증 상태를 사용합니다.
 - `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
-- 운영 values는 PDB(`minAvailable=1`)와 preferred pod anti-affinity를 켜서 자발적 중단/노드 집중 리스크를 줄입니다.
+- 운영 values는 앱 PDB(`minAvailable=1`), Redis PDB, preferred pod anti-affinity, topology spread constraint를 켜서 자발적 중단/노드 집중 리스크를 줄입니다.
+- 내부 Redis는 단일 StatefulSet/PVC입니다. 완전한 Redis HA가 필요하면 `redis.enabled=false` 와 `redis.external.existingSecret`/`env.REDIS_URL` 로 외부 managed/HA Redis를 붙이세요.
 - 앱은 Kubernetes API를 쓰지 않으므로 기본 ServiceAccount token automount는 꺼져 있습니다.
 
 웹 비밀번호를 잊었거나 Secret에 보관한 값과 Redis 런타임 값을 다시 맞춰야 하면 admin CLI로 재설정합니다.
@@ -215,10 +217,10 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `resources`
 - `podSecurityContext`, `securityContext`
 - `podDisruptionBudget.*`
-- `affinity`, `nodeSelector`, `tolerations`
+- `topologySpreadConstraints`, `affinity`, `nodeSelector`, `tolerations`
 - `terminationGracePeriodSeconds`
 - `env.*`
-- `redis.enabled`, `redis.persistence.*`, `redis.external.*`, `redis.podSecurityContext`, `redis.securityContext`
+- `redis.enabled`, `redis.persistence.*`, `redis.external.*`, `redis.podDisruptionBudget.*`, `redis.podSecurityContext`, `redis.securityContext`
 - `proxyApiKey.value`
 - `proxyApiKey.existingSecret`
 - `proxyState.persistence.*`

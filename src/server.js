@@ -611,6 +611,46 @@ function requestIsSecure(req) {
   return forwardedProto === 'https';
 }
 
+function buildSecurityHeaders(req) {
+  if (!config.securityHeadersEnabled) {
+    return {};
+  }
+
+  const headers = {
+    'content-security-policy': [
+      "default-src 'self'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "img-src 'self' data:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "connect-src 'self'",
+    ].join('; '),
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  };
+
+  if (config.hstsEnabled && requestIsSecure(req)) {
+    headers['strict-transport-security'] = [
+      `max-age=${config.hstsMaxAgeSeconds}`,
+      config.hstsIncludeSubDomains ? 'includeSubDomains' : '',
+    ].filter(Boolean).join('; ');
+  }
+
+  return headers;
+}
+
+function attachSecurityHeaders(req, res) {
+  for (const [name, value] of Object.entries(buildSecurityHeaders(req))) {
+    if (!res.hasHeader(name)) {
+      res.setHeader(name, value);
+    }
+  }
+}
+
 function html(res, status, body, extraHeaders = {}) {
   const payload = Buffer.from(body, 'utf8');
   res.writeHead(status, {
@@ -1734,6 +1774,7 @@ async function handleMessages(req, res) {
 
 function requestHandler(req, res) {
   recordRequest(req, res);
+  attachSecurityHeaders(req, res);
   const pathname = requestPathname(req);
 
   if (req.method === 'GET' && pathname === '/favicon.svg') {

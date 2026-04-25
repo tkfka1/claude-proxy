@@ -19,6 +19,9 @@ spec:
         {{- include "claude-anthropic-proxy.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis
     spec:
+      {{- with .Values.redis.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       {{- with .Values.redis.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -44,12 +47,14 @@ spec:
             - "1"
             - --dir
             - /data
+          {{- with .Values.redis.livenessProbe }}
           livenessProbe:
-            tcpSocket:
-              port: redis
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.redis.readinessProbe }}
           readinessProbe:
-            tcpSocket:
-              port: redis
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.redis.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

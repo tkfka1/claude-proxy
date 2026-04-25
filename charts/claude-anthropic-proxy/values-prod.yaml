@@ -31,6 +31,20 @@ autoscaling:
   maxReplicas: 2
   targetCPUUtilizationPercentage: 80
 
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: claude-anthropic-proxy
+        app.kubernetes.io/instance: claude-proxy
+      matchExpressions:
+        - key: app.kubernetes.io/component
+          operator: NotIn
+          values:
+            - redis
+
 affinity:
   podAntiAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
@@ -72,6 +86,10 @@ env:
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
   PROXY_API_KEY_GRACE_PERIOD_SECONDS: "300"
   PROXY_API_KEY_HISTORY_LIMIT: "5"
+  SECURITY_HEADERS_ENABLED: "true"
+  HSTS_ENABLED: "true"
+  HSTS_MAX_AGE_SECONDS: "31536000"
+  HSTS_INCLUDE_SUBDOMAINS: "false"
 
 proxyState:
   persistence:
@@ -86,6 +104,9 @@ redis:
   persistence:
     enabled: true
     size: 1Gi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   resources:
     requests:
       cpu: 50m

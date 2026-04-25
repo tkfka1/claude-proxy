@@ -56,6 +56,23 @@ redis:
       - ReadWriteOnce
     size: 1Gi
     annotations: {}
+  terminationGracePeriodSeconds: 30
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+    maxUnavailable: null
+  livenessProbe:
+    exec:
+      command:
+        - sh
+        - -ec
+        - redis-cli ping | grep -q PONG
+  readinessProbe:
+    exec:
+      command:
+        - sh
+        - -ec
+        - redis-cli ping | grep -q PONG
   resources: {}
   podSecurityContext:
     fsGroup: 999
@@ -111,6 +128,8 @@ podDisruptionBudget:
   minAvailable: 1
   maxUnavailable: null
 
+topologySpreadConstraints: []
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
@@ -143,6 +162,10 @@ env:
   DEFAULT_ANTHROPIC_VERSION: "2023-06-01"
   PROXY_API_KEY_GRACE_PERIOD_SECONDS: "300"
   PROXY_API_KEY_HISTORY_LIMIT: "5"
+  SECURITY_HEADERS_ENABLED: "true"
+  HSTS_ENABLED: "true"
+  HSTS_MAX_AGE_SECONDS: "31536000"
+  HSTS_INCLUDE_SUBDOMAINS: "false"
 
 proxyApiKey:
   value: ""

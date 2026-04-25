@@ -26,6 +26,10 @@ process.env.MOCK_CLAUDE_AUTH_LOGGED_IN = 'false';
 process.env.REDIS_URL = '';
 process.env.ALLOW_LOCAL_STATE_BACKEND = 'true';
 process.env.REDIS_KEY_PREFIX = 'claude-anthropic-proxy';
+process.env.SECURITY_HEADERS_ENABLED = 'true';
+process.env.HSTS_ENABLED = 'true';
+process.env.HSTS_MAX_AGE_SECONDS = '31536000';
+process.env.HSTS_INCLUDE_SUBDOMAINS = 'false';
 
 const {
   config,
@@ -116,6 +120,10 @@ test.beforeEach(async () => {
   config.proxyApiKey = '';
   config.claudeRequestTimeoutMs = 300_000;
   config.claudeStreamIdleTimeoutMs = 60_000;
+  config.securityHeadersEnabled = true;
+  config.hstsEnabled = true;
+  config.hstsMaxAgeSeconds = 31_536_000;
+  config.hstsIncludeSubDomains = false;
   await proxyApiKeyManager.resetApiKey('');
   await resetWebPasswordForTests();
   config.allowMissingApiKeyHeader = true;
@@ -173,6 +181,28 @@ test('GET / honors Accept quality for JSON clients', async () => {
   assert.match(response.headers.get('content-type') || '', /^application\/json\b/);
   const body = await response.json();
   assert.equal(body.ok, true);
+});
+
+test('responses include browser hardening headers and conditional HSTS', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const plainResponse = await fetch(`${baseUrl}/health`);
+
+  assert.equal(plainResponse.status, 200);
+  assert.match(plainResponse.headers.get('content-security-policy') || '', /frame-ancestors 'none'/);
+  assert.equal(plainResponse.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(plainResponse.headers.get('x-frame-options'), 'DENY');
+  assert.equal(plainResponse.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(plainResponse.headers.get('strict-transport-security'), null);
+
+  const forwardedHttpsResponse = await fetch(`${baseUrl}/health`, {
+    headers: {
+      'x-forwarded-proto': 'https',
+    },
+  });
+
+  assert.equal(forwardedHttpsResponse.status, 200);
+  assert.equal(forwardedHttpsResponse.headers.get('strict-transport-security'), 'max-age=31536000');
 });
 
 test('GET /docs shows the login page when web password is enabled', async () => {
