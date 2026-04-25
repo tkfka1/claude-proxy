@@ -31,6 +31,8 @@ import { faviconSvg, renderHomePage, renderLoginPage, serviceMetadata } from './
 
 const config = loadConfig();
 const WEB_SESSION_COOKIE_NAME = 'claude_proxy_web_session';
+const CALL_TEST_DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const CALL_TEST_DEFAULT_PROMPT = 'Reply only OK.';
 const webSessions = new Map();
 const webLoginAttempts = new Map();
 let memoryWebPasswordState = null;
@@ -337,6 +339,7 @@ function buildServiceMetadata() {
       status: '/proxy-api-key',
       update: '/proxy-api-key',
     },
+    call_test_path: '/call-test',
   };
 }
 
@@ -1076,6 +1079,156 @@ async function handleRecentLogsClear(req, res) {
   });
 }
 
+function getLoopbackBaseUrl() {
+  const address = server.listening ? server.address() : null;
+  const port = address && typeof address === 'object' && address.port
+    ? address.port
+    : config.port;
+
+  return `http://127.0.0.1:${port}`;
+}
+
+function normalizeCallTestBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ProxyError(400, 'invalid_request_error', 'Request body must be a JSON object');
+  }
+
+  const model = typeof body.model === 'string' && body.model.trim()
+    ? body.model.trim()
+    : CALL_TEST_DEFAULT_MODEL;
+  const prompt = typeof body.prompt === 'string' && body.prompt.trim()
+    ? body.prompt.trim()
+    : CALL_TEST_DEFAULT_PROMPT;
+  const rawMaxTokens = body.max_tokens ?? body.maxTokens ?? 32;
+  const maxTokens = typeof rawMaxTokens === 'string' && rawMaxTokens.trim()
+    ? Number(rawMaxTokens)
+    : rawMaxTokens;
+
+  if (!model) {
+    throw new ProxyError(400, 'invalid_request_error', 'model is required');
+  }
+
+  if (!prompt) {
+    throw new ProxyError(400, 'invalid_request_error', 'prompt is required');
+  }
+
+  if (prompt.length > 2_000) {
+    throw new ProxyError(400, 'invalid_request_error', 'prompt must be 2000 characters or fewer');
+  }
+
+  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 1024) {
+    throw new ProxyError(400, 'invalid_request_error', 'max_tokens must be an integer between 1 and 1024');
+  }
+
+  return {
+    model,
+    prompt,
+    maxTokens,
+  };
+}
+
+function parseCallTestResponseBody(text) {
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      raw: text.slice(0, 2_000),
+      truncated: text.length > 2_000,
+    };
+  }
+}
+
+function previewPrompt(prompt) {
+  return prompt.length > 120 ? `${prompt.slice(0, 117)}...` : prompt;
+}
+
+async function handleCallTest(req, res) {
+  const requestId = createRequestId();
+
+  if (!(await ensureDocsAccess(req, res, { requireWebLogin: true }))) {
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req, 16 * 1024);
+    const { model, prompt, maxTokens } = normalizeCallTestBody(body);
+    const apiKey = proxyApiKeyManager.getApiKey();
+
+    if (!apiKey && !config.allowMissingApiKeyHeader) {
+      log('call test rejected', { requestId, reason: 'missing-proxy-api-key' }, 'warn');
+      jsonError(
+        res,
+        503,
+        'x-api-key is not configured yet. Save a proxy key before running the call test.',
+      );
+      return;
+    }
+
+    const headers = {
+      'content-type': 'application/json',
+      'anthropic-version': config.defaultAnthropicVersion,
+    };
+
+    if (apiKey) {
+      headers['x-api-key'] = apiKey;
+    }
+
+    const started = Date.now();
+    const proxyResponse = await fetch(`${getLoopbackBaseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+    });
+    const responseText = await proxyResponse.text();
+    const elapsedMs = Date.now() - started;
+    const proxyRequestId = proxyResponse.headers.get('request-id') || null;
+    const ok = proxyResponse.ok;
+
+    json(res, 200, {
+      ok,
+      proxyStatus: proxyResponse.status,
+      elapsedMs,
+      requestId,
+      proxyRequestId,
+      request: {
+        model,
+        max_tokens: maxTokens,
+        promptPreview: previewPrompt(prompt),
+      },
+      response: parseCallTestResponseBody(responseText),
+    }, {
+      'cache-control': 'no-store',
+      'request-id': requestId,
+    });
+
+    log('call test completed', {
+      requestId,
+      proxyRequestId,
+      ok,
+      proxyStatus: proxyResponse.status,
+      elapsedMs,
+      model,
+      max_tokens: maxTokens,
+      promptChars: prompt.length,
+    }, ok ? 'info' : 'warn');
+  } catch (error) {
+    const status = error instanceof ProxyError ? error.status : 500;
+    log('call test failed', { requestId, error: error.message }, status < 500 ? 'warn' : 'error');
+    jsonError(res, status, error.message || 'Call test failed.');
+  }
+}
+
 function applyProxyAuth(req, requestId, { requireAnthropicVersion = config.requireAnthropicVersion } = {}) {
   const apiKey = req.headers['x-api-key'];
   const anthropicVersion = req.headers['anthropic-version'];
@@ -1563,6 +1716,11 @@ function requestHandler(req, res) {
 
   if (req.method === 'DELETE' && req.url === '/logs/recent') {
     void handleRecentLogsClear(req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/call-test') {
+    void handleCallTest(req, res);
     return;
   }
 

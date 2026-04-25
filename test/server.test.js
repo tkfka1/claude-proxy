@@ -253,6 +253,9 @@ test('POST /login creates a session and grants access to the docs page', async (
   assert.match(body, /SSO 강제 사용/);
   assert.match(body, /키 저장/);
   assert.match(body, /새 키 발급/);
+  assert.match(body, /Call test/);
+  assert.match(body, /id="call-test-form"/);
+  assert.match(body, /호출 테스트/);
   assert.match(body, /로그 검색/);
   assert.match(body, /JSON 저장/);
   assert.match(body, /로그 비우기/);
@@ -350,6 +353,88 @@ test('GET /api-info returns service metadata JSON', async () => {
   assert.deepEqual(body.endpoints, ['/health', '/ready', '/metrics', '/v1/messages', '/v1/models']);
   assert.equal(body.web_login_enabled, true);
   assert.equal(body.docs_path, '/docs');
+  assert.equal(body.call_test_path, '/call-test');
+});
+
+test('POST /call-test requires docs authentication', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+
+  const response = await fetch(`${baseUrl}/call-test`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error, 'Web docs login is required.');
+});
+
+test('POST /call-test runs a real proxied message call', async () => {
+  process.env.MOCK_CLAUDE_RESULT = 'call test ok';
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+  await proxyApiKeyManager.resetApiKey('runtime-secret-key');
+  config.allowMissingApiKeyHeader = false;
+
+  const response = await fetch(`${baseUrl}/call-test`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      cookie,
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 32,
+      prompt: 'Reply call test ok.',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('request-id') || '', /^req_/);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.proxyStatus, 200);
+  assert.equal(body.request.model, 'claude-sonnet-4-20250514');
+  assert.equal(body.request.max_tokens, 32);
+  assert.equal(body.request.promptPreview, 'Reply call test ok.');
+  assert.match(body.requestId, /^req_/);
+  assert.match(body.proxyRequestId, /^req_/);
+  assert.equal(body.response.content[0].text, 'call test ok');
+  assert.equal(typeof body.elapsedMs, 'number');
+
+  const logsResponse = await fetch(`${baseUrl}/logs/recent`, {
+    headers: {
+      cookie,
+    },
+  });
+  const logsBody = await logsResponse.json();
+  const callTestLog = logsBody.entries.find((entry) => entry.event === 'call test completed');
+  assert.equal(callTestLog?.level, 'info');
+  assert.equal(callTestLog?.details?.proxyStatus, 200);
+});
+
+test('POST /call-test reports missing proxy key when headers are disallowed', async () => {
+  const baseUrl = server.listening ? `http://127.0.0.1:${server.address().port}` : await startServer();
+  const cookie = await loginDocs(baseUrl);
+  config.allowMissingApiKeyHeader = false;
+
+  const response = await fetch(`${baseUrl}/call-test`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      cookie,
+    },
+    body: JSON.stringify({}),
+  });
+
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.match(body.error, /x-api-key is not configured yet/);
 });
 
 test('GET /health returns process status and backend summary', async () => {

@@ -336,10 +336,12 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
 
       input,
       select,
+      textarea,
       button { font: inherit; }
 
       input,
-      select {
+      select,
+      textarea {
         width: 100%;
         min-height: 48px;
         padding: 12px 14px;
@@ -351,9 +353,15 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
       }
 
       input:focus,
-      select:focus {
+      select:focus,
+      textarea:focus {
         border-color: rgba(200, 245, 109, 0.82);
         box-shadow: 0 0 0 4px rgba(200, 245, 109, 0.12);
+      }
+
+      textarea {
+        min-height: 104px;
+        resize: vertical;
       }
 
       button {
@@ -734,6 +742,33 @@ export function renderHomePage(config) {
       <section class="panel">
         <div class="topbar">
           <div>
+            <h2>Call test</h2>
+            <div class="muted">저장된 x-api-key로 /v1/messages를 실제 호출합니다.</div>
+          </div>
+          <button id="call-test-submit" type="submit" form="call-test-form">호출 테스트</button>
+        </div>
+        <form id="call-test-form" style="margin-top: 16px;">
+          <div class="split" style="align-items: end;">
+            <label>
+              Model
+              <input id="call-test-model" value="claude-sonnet-4-20250514" required />
+            </label>
+            <label>
+              Max tokens
+              <input id="call-test-max-tokens" type="number" min="1" max="1024" value="32" required />
+            </label>
+          </div>
+          <label>
+            Prompt
+            <textarea id="call-test-prompt" maxlength="2000" required>Reply only OK.</textarea>
+          </label>
+        </form>
+        <pre id="call-test-output" style="margin-top: 16px;">아직 호출 테스트를 실행하지 않았습니다.</pre>
+      </section>
+
+      <section class="panel">
+        <div class="topbar">
+          <div>
             <h2>Live logs</h2>
           </div>
           <button id="recent-log-refresh" type="button" class="secondary">새로고침</button>
@@ -828,6 +863,12 @@ export function renderHomePage(config) {
         const proxyApiKeyReset = document.getElementById('proxy-api-key-reset');
         const messageExamplePre = document.getElementById('message-example');
         const streamExamplePre = document.getElementById('stream-example');
+        const callTestForm = document.getElementById('call-test-form');
+        const callTestSubmit = document.getElementById('call-test-submit');
+        const callTestModel = document.getElementById('call-test-model');
+        const callTestMaxTokens = document.getElementById('call-test-max-tokens');
+        const callTestPrompt = document.getElementById('call-test-prompt');
+        const callTestOutput = document.getElementById('call-test-output');
         const recentLogSummary = document.getElementById('recent-log-summary');
         const recentLogOutput = document.getElementById('recent-log-output');
         const recentLogRefresh = document.getElementById('recent-log-refresh');
@@ -977,6 +1018,42 @@ export function renderHomePage(config) {
             proxyApiKeySummary.innerHTML = '<strong>x-api-key 상태 확인 실패</strong>';
             proxyApiKeyDetail.textContent = error.message;
           }
+        }
+
+        function syncCallTest(disabled) {
+          callTestSubmit.disabled = disabled;
+          callTestModel.disabled = disabled;
+          callTestMaxTokens.disabled = disabled;
+          callTestPrompt.disabled = disabled;
+        }
+
+        function extractCallTestText(response) {
+          const content = response && Array.isArray(response.content) ? response.content : [];
+          return content
+            .filter((block) => block && block.type === 'text')
+            .map((block) => String(block.text || ''))
+            .join('\\n')
+            .trim();
+        }
+
+        function formatCallTestResult(payload) {
+          const request = payload.request || {};
+          const lines = [
+            (payload.ok ? 'OK' : 'FAILED') + ' · HTTP ' + payload.proxyStatus + ' · ' + payload.elapsedMs + 'ms',
+            'requestId: ' + (payload.requestId || '-'),
+            'proxyRequestId: ' + (payload.proxyRequestId || '-'),
+            'model: ' + (request.model || '-'),
+            'max_tokens: ' + (request.max_tokens || '-'),
+          ];
+          const text = extractCallTestText(payload.response);
+
+          if (text) {
+            lines.push('', text);
+          } else if (payload.response) {
+            lines.push('', JSON.stringify(payload.response, null, 2));
+          }
+
+          return lines.join('\\n');
         }
 
         function renderRecentLogSummary(payload, visibleEntries) {
@@ -1145,6 +1222,31 @@ export function renderHomePage(config) {
             proxyApiKeyPreview.textContent = error.message;
           } finally {
             syncProxyApiKeyButtons(false);
+          }
+        });
+
+        callTestForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          syncCallTest(true);
+          callTestOutput.textContent = '호출 중...';
+          try {
+            const payload = await fetchJson('/call-test', {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: callTestModel.value.trim(),
+                max_tokens: Number(callTestMaxTokens.value),
+                prompt: callTestPrompt.value,
+              }),
+            });
+            callTestOutput.textContent = formatCallTestResult(payload);
+            await refreshRecentLogs();
+          } catch (error) {
+            callTestOutput.textContent = error.message;
+          } finally {
+            syncCallTest(false);
           }
         });
 

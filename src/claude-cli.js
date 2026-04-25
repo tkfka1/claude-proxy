@@ -234,7 +234,6 @@ export function runClaudeStream({
   if (timeoutMs > 0) {
     timeoutId = setTimeout(() => failWithTimeout('stream request', timeoutMs), timeoutMs);
   }
-  refreshIdleTimer();
 
   child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
 
