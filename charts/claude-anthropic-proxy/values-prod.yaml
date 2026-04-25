@@ -40,6 +40,11 @@ affinity:
             matchLabels:
               app.kubernetes.io/name: claude-anthropic-proxy
               app.kubernetes.io/instance: claude-proxy
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: NotIn
+                values:
+                  - redis
           topologyKey: kubernetes.io/hostname
 
 terminationGracePeriodSeconds: 30
