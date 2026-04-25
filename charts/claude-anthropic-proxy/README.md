@@ -193,10 +193,11 @@ helm upgrade --install claude-proxy ./charts/claude-anthropic-proxy \
 - `ingress.enabled`
 - `autoscaling.*`
 - `resources`
+- `podSecurityContext`, `securityContext`
 - `podDisruptionBudget.*`
 - `terminationGracePeriodSeconds`
 - `env.*`
-- `redis.enabled`, `redis.persistence.*`, `redis.external.*`
+- `redis.enabled`, `redis.persistence.*`, `redis.external.*`, `redis.podSecurityContext`, `redis.securityContext`
 - `proxyApiKey.value`
 - `proxyApiKey.existingSecret`
 - `proxyState.persistence.*`
