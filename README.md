@@ -398,8 +398,14 @@ make pm2-restart
   - Helm lint / template 검증
   - `linux/amd64`, `linux/arm64` Docker 빌드 검증
   - `main` push 가 성공하면 GHCR 멀티아키 이미지 `:main`, `:sha-<7자리>` 자동 push
+- `.github/workflows/auto-release.yml`
+  - `main` CI 성공 후 `package.json` / `package-lock.json` 버전을 자동 bump
+  - 자동으로 `vX.Y.Z` 태그와 GitHub Release 생성
+  - GHCR 멀티아키 이미지 `:latest`, `:X.Y.Z`, `:X.Y`, `:sha-<7자리>` push
+  - `NPM_TOKEN` 이 있으면 npm publish, 없으면 npm publish만 skip
+  - `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` 이 있으면 Docker Hub도 같이 push
 - `.github/workflows/release.yml`
-  - `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
+  - 수동 fallback: `main` 에서 딴 `v*.*.*` 태그만 릴리즈 허용
   - `NPM_TOKEN` 이 있을 때만 npm 패키지 publish
   - GitHub Release 생성
   - GHCR 멀티아키 이미지(`linux/amd64`, `linux/arm64`) push
@@ -407,19 +413,21 @@ make pm2-restart
 
 ### 릴리즈 절차
 
-`main` push 는 edge 이미지 배포까지만 자동으로 합니다.
-공식 릴리즈(`:latest`, `vX.Y.Z`, GitHub Release, optional npm publish)는 아래처럼 태그 push 때만 만듭니다.
+기본 경로는 **자동 릴리즈**입니다.
 
-1. `main` 에 머지
-2. `package.json` 버전 확인
-3. 태그 생성 및 push
+1. PR을 `main` 에 merge
+2. CI가 통과
+3. `auto-release.yml` 이 버전을 자동 bump하고 `vX.Y.Z` 태그 생성
+4. GitHub Release, GHCR release image, optional npm publish 실행
 
-```bash
-git checkout main
-git pull --ff-only
-git tag v1.1.0
-git push origin main --tags
-```
+버전 bump 규칙:
+
+- commit message에 `BREAKING CHANGE` 또는 conventional commit `!` 이 있으면 major
+- Redis 필수화처럼 배포 호환성을 깨는 Redis requirement diff가 감지되면 major
+- `feat:` / `feature:` / `Add ...` / `Create ...` / `Introduce ...` 패턴이면 minor
+- 그 외는 patch
+
+수동 태그 릴리즈도 fallback으로 남겨 두었습니다. 직접 태그를 push하면 `release.yml` 이 실행됩니다.
 
 ### npm publish 인증
 
