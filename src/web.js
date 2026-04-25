@@ -119,7 +119,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
       .eyebrow,
       .pill,
       .method,
-      .inline-code,
       .log-chip {
         display: inline-flex;
         align-items: center;
@@ -164,13 +163,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
       }
 
       a { color: var(--accent); }
-
-      .lede {
-        max-width: 680px;
-        margin-bottom: 0;
-        color: #d9ded1;
-        font-size: 1.04rem;
-      }
 
       .muted { color: var(--muted); }
 
@@ -221,61 +213,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         opacity: 0.62;
       }
 
-      .hero-kicker {
-        margin: 90px 0 14px;
-        color: var(--amber);
-        font-size: 0.8rem;
-        font-weight: 900;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-      }
-
-      .login-copy {
-        max-width: 600px;
-        color: #d9ded1;
-        font-size: 1.18rem;
-      }
-
-      .login-signal {
-        position: absolute;
-        left: 52px;
-        right: 52px;
-        bottom: 46px;
-        z-index: 1;
-        display: grid;
-        gap: 10px;
-        max-width: 560px;
-      }
-
-      .signal-line {
-        display: grid;
-        grid-template-columns: 10px 120px 1fr;
-        gap: 12px;
-        align-items: center;
-        padding: 12px 14px;
-        border: 1px solid rgba(246, 241, 231, 0.1);
-        border-radius: 16px;
-        background: rgba(0, 0, 0, 0.28);
-        color: #d9ded1;
-      }
-
-      .signal-line span {
-        width: 8px;
-        height: 8px;
-        border-radius: 999px;
-        background: var(--accent);
-        box-shadow: 0 0 18px rgba(200, 245, 109, 0.7);
-      }
-
-      .signal-line strong { font-size: 0.86rem; }
-      .signal-line em {
-        color: var(--muted);
-        font-style: normal;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
       .login-card {
         display: grid;
         align-items: center;
@@ -299,12 +236,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         color: var(--accent);
         background: rgba(200, 245, 109, 0.08);
         font-size: 1.3rem;
-      }
-
-      .login-footnote {
-        margin: 2px 0 0;
-        color: var(--muted);
-        font-size: 0.88rem;
       }
 
       .grid,
@@ -343,7 +274,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         word-break: break-word;
       }
 
-      .inline-code,
       .method {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 0.85rem;
@@ -567,16 +497,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
           padding: 34px;
         }
 
-        .hero-kicker { margin-top: 54px; }
-
-        .login-signal {
-          position: relative;
-          left: auto;
-          right: auto;
-          bottom: auto;
-          margin-top: 34px;
-        }
-
         .login-card {
           border-left: 0;
           border-top: 1px solid var(--line);
@@ -594,8 +514,6 @@ function renderLayout({ title, eyebrow = '', body, pageClass = '' }) {
         .login-hero, .login-card { padding: 24px; }
         h1 { font-size: clamp(2.05rem, 12vw, 3.2rem); }
         .split { grid-template-columns: 1fr; }
-        .signal-line { grid-template-columns: 10px 1fr; }
-        .signal-line em { grid-column: 2; }
       }
     </style>
   </head>
@@ -624,31 +542,22 @@ export function renderLoginPage({ errorMessage = '', loginPath = '/login' } = {}
           <span class="wordmark-mark">CP</span>
           <span>Claude Proxy</span>
         </div>
-        <p class="hero-kicker">Private AI gateway</p>
-        <h1>Claude를<br />사내 API처럼.</h1>
-        <p class="login-copy">키, 로그, 세션만 남긴 운영 콘솔. 들어가서 바로 조치합니다.</p>
-        <div class="login-signal" aria-label="service signals">
-          <div class="signal-line"><span></span><strong>Ingress</strong><em>claude-proxy.idc.hkyo.kr</em></div>
-          <div class="signal-line"><span></span><strong>State</strong><em>Redis-backed runtime</em></div>
-          <div class="signal-line"><span></span><strong>Logs</strong><em>Live request trail</em></div>
-        </div>
+        <h1 style="margin-top: 96px;">Claude Proxy</h1>
       </section>
       <aside class="login-card">
         <div class="login-card-inner">
           <div class="lock-icon" aria-hidden="true">⌁</div>
           <div>
-            <h2>운영자 로그인</h2>
-            <p class="muted" style="margin-bottom: 0;">비밀번호만 입력하세요.</p>
+            <h2>Login</h2>
           </div>
           ${errorBlock}
           <form method="post" action="${escapeHtml(loginPath)}">
             <label>
-              Access password
+              Password
               <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" required />
             </label>
-            <button type="submit" class="wide">Enter console</button>
+            <button type="submit" class="wide">Enter</button>
           </form>
-          <p class="login-footnote">로그인 후 proxy key · logs · Claude session 관리</p>
         </div>
       </aside>
     `,
@@ -701,7 +610,6 @@ export function renderHomePage(config) {
 
   return renderLayout({
     title: 'Claude Proxy Console',
-    eyebrow: 'Operator console',
     pageClass: 'console-page',
     body: `
       <div class="topbar console-topbar">
@@ -710,8 +618,7 @@ export function renderHomePage(config) {
             <span class="wordmark-mark">CP</span>
             <span>Claude Proxy</span>
           </div>
-          <h1>Control room.</h1>
-          <p class="lede">프록시 키, 라이브 로그, Claude 세션. 운영에 필요한 것만 남겼습니다.</p>
+          <h1>Claude Proxy</h1>
         </div>
         <form method="post" action="/logout" class="top-actions"><button type="submit" class="secondary">로그아웃</button></form>
       </div>
@@ -739,7 +646,6 @@ export function renderHomePage(config) {
         <div class="topbar">
           <div>
             <h2>Routes</h2>
-            <p class="muted" style="margin-bottom: 0;">외부 연동에 필요한 경로만 표시합니다.</p>
           </div>
         </div>
         <ul class="endpoint-list compact" style="margin-top: 16px;">
@@ -753,7 +659,6 @@ export function renderHomePage(config) {
       <section class="split">
         <article class="panel">
           <h2>Console password</h2>
-          <p class="muted">변경하면 현재 세션을 종료하고 다시 로그인합니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="web-password-summary"><strong>상태 확인 중...</strong></div>
             <div id="web-password-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
@@ -782,7 +687,6 @@ export function renderHomePage(config) {
       <section class="split">
         <article class="panel">
           <h2>Proxy key</h2>
-          <p class="muted">저장하면 <span class="inline-code">/v1/messages</span>가 이 키만 받습니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="proxy-api-key-summary"><strong>상태 확인 중...</strong></div>
             <div id="proxy-api-key-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
@@ -800,7 +704,6 @@ export function renderHomePage(config) {
         </article>
         <article class="panel">
           <h2>Current key</h2>
-          <p class="muted">로그인한 운영자에게만 원문을 보여줍니다.</p>
           <pre id="proxy-api-key-preview">현재 설정된 x-api-key 가 없습니다.</pre>
         </article>
       </section>
@@ -820,7 +723,6 @@ export function renderHomePage(config) {
         <div class="topbar">
           <div>
             <h2>Live logs</h2>
-            <p class="muted" style="margin-bottom: 0;">검색, 레벨 필터, JSON 저장.</p>
           </div>
           <button id="recent-log-refresh" type="button" class="secondary">새로고침</button>
         </div>
@@ -856,7 +758,6 @@ export function renderHomePage(config) {
       <section class="split">
         <article class="panel">
           <h2>Claude session</h2>
-          <p class="muted">서버의 Claude CLI 인증 상태입니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <div id="claude-auth-summary"><strong>상태 확인 중...</strong></div>
             <div id="claude-auth-detail" class="muted" style="margin-top: 8px;">잠시만 기다려 주세요.</div>
@@ -885,7 +786,6 @@ export function renderHomePage(config) {
         </article>
         <article class="panel">
           <h2>Auth output</h2>
-          <p class="muted">감지된 링크가 있으면 여기서 바로 엽니다.</p>
           <div class="banner" style="margin-bottom: 16px;">
             <ul id="claude-auth-links" class="link-list">
               <li class="muted">아직 감지된 로그인 링크가 없습니다.</li>

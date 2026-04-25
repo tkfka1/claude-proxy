@@ -182,8 +182,9 @@ test('GET /docs shows the login page when web password is enabled', async () => 
   assert.equal(response.headers.get('vary'), 'Cookie');
   const body = await response.text();
   assert.match(body, /Claude Proxy/);
-  assert.match(body, /운영자 로그인/);
-  assert.match(body, /Private AI gateway/);
+  assert.match(body, /Login/);
+  assert.doesNotMatch(body, /Claude를/);
+  assert.doesNotMatch(body, /Private AI gateway/);
   assert.doesNotMatch(body, /WEB_PASSWORD/);
   assert.doesNotMatch(body, /WEB_PASSWORD_HASH/);
   assert.doesNotMatch(body, /들어가면 보이는 것/);
@@ -215,7 +216,8 @@ test('POST /login creates a session and grants access to the docs page', async (
 
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /Control room/);
+  assert.match(body, /Claude Proxy/);
+  assert.doesNotMatch(body, /Control room/);
   assert.match(body, /Routes/);
   assert.match(body, /POST/);
   assert.match(body, /\/v1\/messages/);
@@ -307,7 +309,7 @@ test('POST /logout clears the docs session', async () => {
 
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /운영자 로그인/);
+  assert.match(body, /Login/);
 });
 
 test('GET /api-info returns service metadata JSON', async () => {
