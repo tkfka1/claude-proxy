@@ -30,6 +30,7 @@ import {
 import { createRedisMessageConcurrencyManager } from '../src/redis-message-concurrency.js';
 import { createRecentLogStore } from '../src/recent-log-store.js';
 import { createRedisStateStore } from '../src/redis-state-store.js';
+import { resetWebPassword } from '../src/admin.js';
 import {
   createClaudeAuthManager,
   normalizeClaudeAuthSnapshot,
@@ -157,7 +158,22 @@ class FakeRedisStateClient {
   }
 
   async del(key) {
-    this.values.delete(key);
+    const keys = Array.isArray(key) ? key : [key];
+    let deleted = 0;
+    for (const item of keys) {
+      if (this.values.delete(item)) {
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
+
+  async keys(pattern) {
+    const escaped = pattern
+      .replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
+      .replace(/\*/g, '.*');
+    const regex = new RegExp(`^${escaped}$`);
+    return [...this.values.keys()].filter((key) => regex.test(key));
   }
 
   async quit() {
@@ -220,9 +236,8 @@ test('validateWebPasswordSettings requires a docs password or hash', () => {
     () => validateWebPasswordSettings({ webPassword: '', webPasswordHash: '' }),
     /Set WEB_PASSWORD or WEB_PASSWORD_HASH/,
   );
-  assert.throws(
-    () => validateWebPasswordSettings({ webPassword: 'replace-with-strong-docs-password', webPasswordHash: '' }),
-    /must be replaced with a real secret/,
+  assert.doesNotThrow(
+    () => validateWebPasswordSettings({ webPassword: 'password', webPasswordHash: '' }),
   );
 });
 
@@ -851,4 +866,29 @@ test('redis state store saves and loads proxy state plus recent logs', async () 
   assert.equal(await claudeAuthStore.loadState(), null);
 
   await store.close();
+});
+
+test('resetWebPassword updates Redis runtime password and clears stale web auth state', async () => {
+  const fakeClient = new FakeRedisStateClient();
+  fakeClient.values.set('claude-proxy-test:web-session:old-session', '{"expiresAt":9999999999999}');
+  fakeClient.values.set('claude-proxy-test:web-login-attempt:client', '{"count":5}');
+  fakeClient.values.set('claude-proxy-test:recent-log', '[]');
+
+  const result = await resetWebPassword({
+    password: '1234',
+    redisUrl: 'redis://fake:6379/0',
+    redisKeyPrefix: 'claude-proxy-test',
+    clientFactory: () => fakeClient,
+  });
+
+  assert.equal(result.redisKeyPrefix, 'claude-proxy-test');
+  assert.equal(result.clearedSessions, 1);
+  assert.equal(result.clearedLoginAttempts, 1);
+  assert.equal(fakeClient.values.has('claude-proxy-test:web-session:old-session'), false);
+  assert.equal(fakeClient.values.has('claude-proxy-test:web-login-attempt:client'), false);
+  assert.equal(fakeClient.values.has('claude-proxy-test:recent-log'), true);
+
+  const passwordState = JSON.parse(fakeClient.values.get('claude-proxy-test:web-password'));
+  assert.equal(verifyWebPassword('1234', { webPasswordHash: passwordState.passwordHash }), true);
+  assert.equal(fakeClient.isOpen, false);
 });

@@ -148,6 +148,14 @@ EXTRA_VALUES_FILE=charts/claude-anthropic-proxy/examples/values-ingress-idc-http
 - `/metrics` 에서 request/message/Claude CLI timeout/x-api-key rotation/Redis 상태를 확인할 수 있습니다.
 - Pod 종료 시 SIGTERM graceful shutdown이 실행되며 `terminationGracePeriodSeconds` 안에서 큐, in-flight CLI process, Redis 연결을 정리합니다.
 
+웹 비밀번호를 잊었거나 Secret에 보관한 값과 Redis 런타임 값을 다시 맞춰야 하면 admin CLI로 재설정합니다.
+아래 명령은 비밀번호 파일을 stdin으로 넘기고, 기존 웹 세션과 로그인 실패 카운터를 같이 정리합니다.
+
+```bash
+kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
+  sh -lc 'claude-proxy-admin web-password reset --stdin' < /path/to/password.txt
+```
+
 legacy local-file fallback이 꼭 필요하면 `examples/values-proxy-state-pvc.yaml` 를 참고할 수 있지만, 운영 기본 경로는 Redis입니다.
 
 ## ExternalSecret 예시

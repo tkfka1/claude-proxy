@@ -9,7 +9,7 @@ function sanitizeKeySegment(value) {
     .replace(/-+/g, '-');
 }
 
-function buildKey(prefix, name) {
+export function buildRedisKey(prefix, name) {
   const safePrefix = sanitizeKeySegment(prefix || 'claude-anthropic-proxy');
   return `${safePrefix}:${name}`;
 }
@@ -183,7 +183,7 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
       }
     },
     createProxyApiKeyStore() {
-      const redisKey = buildKey(keyPrefix, 'proxy-api-key');
+      const redisKey = buildRedisKey(keyPrefix, 'proxy-api-key');
 
       return {
         async loadState() {
@@ -203,7 +203,7 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
       };
     },
     createRecentLogStore() {
-      const redisKey = buildKey(keyPrefix, 'recent-log');
+      const redisKey = buildRedisKey(keyPrefix, 'recent-log');
 
       return {
         async loadEntries() {
@@ -223,9 +223,9 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
       };
     },
     createWebAuthStore() {
-      const sessionPrefix = buildKey(keyPrefix, 'web-session');
-      const loginAttemptPrefix = buildKey(keyPrefix, 'web-login-attempt');
-      const passwordKey = buildKey(keyPrefix, 'web-password');
+      const sessionPrefix = buildRedisKey(keyPrefix, 'web-session');
+      const loginAttemptPrefix = buildRedisKey(keyPrefix, 'web-login-attempt');
+      const passwordKey = buildRedisKey(keyPrefix, 'web-password');
 
       return {
         async getSession(token) {
@@ -283,7 +283,7 @@ export async function createRedisStateStore({ url, keyPrefix, clientFactory = cr
       };
     },
     createClaudeAuthStore() {
-      const redisKey = buildKey(keyPrefix, 'claude-auth');
+      const redisKey = buildRedisKey(keyPrefix, 'claude-auth');
 
       return {
         async loadState() {

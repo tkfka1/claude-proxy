@@ -7,40 +7,12 @@ const SCRYPT_OPTIONS = {
   r: 8,
   p: 1,
 };
-const PLACEHOLDER_PASSWORD_PATTERNS = [
-  /^change-this-/,
-  /^replace-/,
-  /^your-/,
-  /^set-me-/,
-];
-const PLACEHOLDER_PASSWORD_VALUES = new Set([
-  'changeme',
-  'password',
-]);
-
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest();
 }
 
 function isHex(value) {
   return /^[0-9a-f]+$/i.test(value);
-}
-
-function looksLikePlaceholderPassword(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  if (normalized.includes('<') || normalized.includes('>')) {
-    return true;
-  }
-
-  if (PLACEHOLDER_PASSWORD_VALUES.has(normalized)) {
-    return true;
-  }
-
-  return PLACEHOLDER_PASSWORD_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function createScryptPasswordHash(password, salt = crypto.randomBytes(16).toString('hex')) {
@@ -83,9 +55,6 @@ export function validateWebPasswordSettings({ webPassword, webPasswordHash }) {
     throw new Error('Set WEB_PASSWORD or WEB_PASSWORD_HASH before starting the server');
   }
 
-  if (!webPasswordHash && looksLikePlaceholderPassword(webPassword)) {
-    throw new Error('WEB_PASSWORD must be replaced with a real secret before starting the server');
-  }
 }
 
 export function validateNewWebPassword(password) {

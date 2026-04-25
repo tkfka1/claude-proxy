@@ -18,6 +18,9 @@ COPY src ./src
 COPY .env.example ./.env.example
 COPY README.md ./README.md
 
+RUN ln -sf /app/bin/claude-anthropic-proxy.js /usr/local/bin/claude-anthropic-proxy \
+  && ln -sf /app/bin/claude-proxy-admin.js /usr/local/bin/claude-proxy-admin
+
 USER node
 
 EXPOSE 8080

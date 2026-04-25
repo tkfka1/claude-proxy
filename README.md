@@ -237,9 +237,23 @@ node --input-type=module -e "import { createScryptPasswordHash } from './src/web
 WEB_PASSWORD_HASH=scrypt$<salt-hex>$<digest-hex>
 ```
 
-둘 다 비워 두면 서버가 시작되지 않습니다.
-또한 `replace-with-...`, `change-this-...`, `<set-a-password>` 같은 placeholder 값도
-그대로 두면 시작 단계에서 거부합니다.
+둘 다 비워 두면 서버가 시작되지 않습니다. 비밀번호 복잡성 제한은 없고, 비어 있지만 않으면 됩니다.
+
+운영에서 웹 비밀번호를 잊었거나 Redis에 저장된 런타임 비밀번호를 초기값과 다시 맞추려면 admin CLI로 재설정할 수 있습니다.
+기본값으로 기존 웹 세션과 로그인 실패 카운터도 같이 지웁니다.
+
+```bash
+claude-proxy-admin web-password reset --password-file /path/to/password.txt
+```
+
+컨테이너 안에서 직접 실행하는 예:
+
+```bash
+kubectl -n claude-proxy exec -i deploy/claude-proxy-claude-anthropic-proxy -- \
+  sh -lc 'claude-proxy-admin web-password reset --stdin' < /path/to/password.txt
+```
+
+Shell history에 남을 수 있으므로 운영에서는 `--password` 보다 `--password-file` 또는 `--stdin` 을 권장합니다.
 
 ### 웹에서 x-api-key 설정
 

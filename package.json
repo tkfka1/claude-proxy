@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/server.js",
   "bin": {
-    "claude-anthropic-proxy": "bin/claude-anthropic-proxy.js"
+    "claude-anthropic-proxy": "bin/claude-anthropic-proxy.js",
+    "claude-proxy-admin": "bin/claude-proxy-admin.js"
   },
   "files": [
     "bin",
